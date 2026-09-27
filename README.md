@@ -1,8 +1,8 @@
 # Open-DSH-Desktop-Plugin-Installer
 
-一个给 **DSH Desktop（DeepSeek Harness 桌面客户端）** 用的 Agent Skill：当客户端自带的插件面板做不到、或你需要对版本有精确控制时，**安装 / 升级 / 启用 DSH 插件**，并在 pnpm 的供应链策略、镜像滞后、git 依赖构建白名单把安装挡住时给出处置。
+一个给 **DSH Desktop（DeepSeek Harness 桌面客户端）** 用的 Agent Skill：当客户端自带的插件面板做不到、或你需要对版本有精确控制时，**安装 / 升级 / 启用 / 停用 / 卸载 DSH 插件**，并在 pnpm 的供应链策略、镜像滞后、git 依赖构建白名单把安装挡住时给出处置；清单被改坏或安装失败时按备份回滚。
 
-先把范围说清楚：**本技能不覆盖插件卸载与禁用**——那是 GUI「插件」页的卸载按钮和一个开关的工作；技能里只记录了官方顺序与风险，并明确标注未实测。下面「覆盖范围」一节逐条列出哪些路径真的跑过、哪些没有。
+范围以实测为准：停用、卸载、从备份回滚这三条路径都用一份本地临时 bundle 完整跑过（含各自的观测判据，见「覆盖范围」）。仍**未验证**的是：顺序颠倒地卸载（仍启用着就移除）、第三方插件自身的副作用、纯客户端插件的完整生命周期、Creator 模式的 `plugin_manager` 路径、macOS/Linux。
 
 DSH Desktop 的 profile 由 Electron 客户端独占，因此：
 
@@ -22,7 +22,10 @@ DSH Desktop 的 profile 由 Electron 客户端独占，因此：
 | 升级 npm 包 | 升到 `0.1.4`（遇到镜像未同步，用 scope 级 `.npmrc` 解决） |
 | 升级 git 源插件 | `dsh-better-sidebar`、`dshmarket`（1.65.1 → 1.66.2），含它们的 `prepare` 构建与 `allowBuilds` 键 |
 | 启用 | 追加到 `dsh.profile.bundles`，宿主热挂载，无需重启 |
-| pnpm 策略修复 | 修好「同一包名多条豁免规则只有第一条生效」导致的全局阻塞；之后用户自己在市场里的更新也恢复正常 |
+| **停用** | 移出 `dsh.profile.bundles`：数秒内卸下该行，状态变 `disabled`、`bundle:false`，进入 `unbundled`；依赖与文件保留；无需重启；加回即恢复 `live` |
+| **卸载** | 按官方顺序（先停用 → 再 `pnpm remove`）：依赖、`installed`、`activation`、`node_modules`、`unbundled` 全部回到基线，其余插件仍 live，无需重启 |
+| **从备份回滚** | 一次**真实损坏**（清单被写坏、宿主插件列表全空）后恢复三个文件，宿主自动回到"全 live、无诊断、与基线逐字节一致" |
+| pnpm 策略修复 | 修好"同一包名多条豁免规则只有第一条生效"导致的全局阻塞；之后用户自己在市场里的更新也恢复正常 |
 | 可观测验证 | 用 `/dsh-market/installed`（Loader 实况）、`updates/summary`、市场与插件管理器日志判定结果 |
 | 写前备份 | 每次改动前把 `package.json` / `pnpm-lock.yaml` / `pnpm-workspace.yaml` 复制到时间戳目录 |
 
@@ -30,9 +33,8 @@ DSH Desktop 的 profile 由 Electron 客户端独占，因此：
 
 | 路径 | 现状 |
 |---|---|
-| 卸载插件 | 未实测。请用 GUI 的卸载按钮；技能内只记录官方执行顺序（先移出 `dsh.profile.bundles` → 再 `pnpm remove` → 可能要重启）并标注风险 |
-| 禁用 / 关掉某个插件 | 未实测（本质是改 `dsh.profile.bundles`，但没用真实插件演练过） |
-| 从备份回滚 | 流程与命令已写清，但没有在真实故障上演练过恢复 |
+| 顺序颠倒地卸载（仍启用着就 `pnpm remove`） | 未演练；按官方说明应先停用再移除 |
+| 第三方（npm / git 源）插件停用或卸载时的自身副作用 | 未验证（演练对象是本地 `file:` 临时 bundle） |
 | 纯客户端插件（`dsh.client`、无宿主半边）的完整生命周期 | 未验证 |
 | Creator 模式的 `plugin_manager` 工具路径 | 未使用（本机会话没有该工具） |
 | macOS / Linux | 技能里的路径探测覆盖了它们，但只在 Windows 上跑过 |
@@ -40,7 +42,7 @@ DSH Desktop 的 profile 由 Electron 客户端独占，因此：
 
 ## 适用场景
 
-- 「帮我装 / 更新某个 DSH 插件」「插件装不上」「更新失败」
+- 「帮我装 / 更新 / 停用 / 卸载某个 DSH 插件」「插件装不上」「更新失败」
 - 插件市场报「插件目录加载失败 / The operation was aborted due to timeout」
 - pnpm 报 `ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION`、`Lockfile failed supply-chain policy check`、`ERR_PNPM_NO_MATCHING_VERSION`、`ERR_PNPM_IGNORED_BUILDS`
 - 需要装**指定的最新版本**、或给 GitHub 源的插件更新到最新提交
@@ -115,8 +117,9 @@ node open-dsh-desktop-plugin-installer/scripts/profile-report.mjs
 - **只读优先**：先侦察、再申请权限、再备份，然后才写文件。
 - **不碰用户的配置层**：`cordis.patch.yml` 是用户自己的插件开关与配置层，客户端自己会维护它；技能除非被明确要求，否则不改。
 - **幂等**：动手前先查已装/已启用状态；已经满足要求就只报告、不重装。
-- **写前备份**：改前把 `package.json` / `pnpm-lock.yaml` / `pnpm-workspace.yaml`（必要时含 `.npmrc`）备份到工作区时间戳目录，并给出回滚命令。回滚本身未在真实故障上演练。
-- **如实报告**：替换已装插件的文件不会替换内存里的模块代——技能会明确说明「是否需要重启才生效」，并且在自己没做过的路径上（卸载、禁用、回滚）直接告诉用户"这条我没验证过"。
+- **写前备份，坏了能回**：改前把 `package.json` / `pnpm-lock.yaml` / `pnpm-workspace.yaml`（必要时含 `.npmrc`）备份到工作区时间戳目录。回滚已实测——一次真实损坏（清单被写坏、插件列表全空）靠恢复这三个文件回到了基线。
+- **manifest 只做结构化编辑**：演练中唯一一次真正的破坏就是把 JSON 拼错了；技能要求改完立刻解析校验（`ConvertFrom-Json` / `JSON.parse`）。
+- **如实报告**：替换已装插件的文件不会替换内存里的模块代——技能会明确说明「是否需要重启才生效」；对仍未验证的路径（顺序颠倒的卸载、第三方插件的停用/卸载副作用、非 Windows 平台）会直接告诉用户"这条我没验证过"。
 
 ## 许可
 

@@ -1,6 +1,6 @@
 ---
 name: open-dsh-desktop-plugin-installer
-description: 为 DSH Desktop（Electron 客户端）的 profile 安装、升级、启用插件——当 GUI 自己做不到、或必须精确控制版本时使用。桌面端 profile 由客户端独占：`dsh plugin --profile desktop` 被明确拒绝，dsh-market 对 git 源的插件一律拒绝，所以只能「按 profile 的真实语义写文件 + 跑它自己的 pnpm」。触发场景：用户说「装/更新 DSH 插件」「插件装不上」「更新失败」「插件市场目录加载失败」，或 pnpm 报 ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION / NO_MATCHING_VERSION / ERR_PNPM_IGNORED_BUILDS / Lockfile failed supply-chain policy，或要装指定版本、要给 GitHub 源的插件更新，或要求别重复安装。卸载与禁用不在覆盖范围：走 GUI，本技能只记录顺序与风险并明确标注未实测。Install, update and enable a plugin in a DSH Desktop profile, and repair pnpm supply-chain / registry / build-approval failures.
+description: 为 DSH Desktop（Electron 客户端）的 profile 安装、升级、启用、停用、卸载插件，并在 pnpm 供应链策略、镜像滞后、git 构建白名单把安装挡住时给出处置；改坏清单或安装失败时按备份回滚。桌面端 profile 由客户端独占：`dsh plugin --profile desktop` 被明确拒绝，dsh-market 对 git 源的插件一律拒绝，所以只能「按 profile 的真实语义写文件 + 跑它自己的 pnpm」。触发场景：用户说「装/更新/停用/卸载 DSH 插件」「插件装不上」「更新失败」「插件市场目录加载失败」，或 pnpm 报 ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION / NO_MATCHING_VERSION / ERR_PNPM_IGNORED_BUILDS / Lockfile failed supply-chain policy / EPERM rename，或要装指定版本、要给 GitHub 源的插件更新，或要求别重复安装。Install, update, enable, disable or remove a plugin in a DSH Desktop profile, and repair pnpm supply-chain / registry / build-approval failures.
 whenToUse: 目标是 DSH Desktop 的插件生命周期操作，而官方 GUI / 市场 / CLI 走不通或需要版本级控制时。
 ---
 
@@ -17,8 +17,8 @@ DSH Desktop 的插件不是"复制一个目录"就完事的：一个插件要同
 | 普通安装（npm 包、GUI 能用） | GUI：侧边栏/设置 →「插件」→ Add plugin（支持 npm 名、git 地址、tarball、本地绝对路径；内含 inspect、注册表选择、回滚、热挂载） |
 | 会话在 Creator 模式 | `plugin_manager` 工具（`install_bundle` / `remove_bundle` / `set_bundle_enabled`），要求 `danger-full-access` 或逐次批准 |
 | GUI 拒绝、需要精确版本、git 源更新、pnpm 报策略错 | **本技能**（直接操作 profile） |
-| 只想开关某个插件 | 改 `dsh.profile.bundles`，或 GUI 的开关；不要动用户的 `cordis.patch.yml` 配置行。本技能只在「启用」方向实测过 |
-| 卸载插件 | GUI「插件」页的卸载（会先确认）。本技能**未实测**该路径，见下「覆盖范围」 |
+| 只想开关某个插件 | 改 `dsh.profile.bundles`，或 GUI 的开关；不要动用户的 `cordis.patch.yml` 配置行。停用与启用两个方向都已实测 |
+| 卸载插件 | GUI「插件」页的卸载，或按阶段 7 的顺序手工做（已实测，见「卸载 / 禁用」） |
 
 市场（dsh-market）不是安装通道：它只装自己精选目录里的插件，检测到有 agent 在跑时直接拒绝安装，且对 git 源（`github:`）在桌面端一律拒绝（其日志写 `this desktop operation is not supported by the official plugin manager`）。它可以当**观测工具**（见下）。
 
@@ -26,9 +26,21 @@ DSH Desktop 的插件不是"复制一个目录"就完事的：一个插件要同
 
 这条规则比任何步骤都重要：**不要在没做过的路径上给用户保证**。
 
-已实测（Windows + DSH Desktop 运行时 `0.1.7-rc.2` + 自带 pnpm `11.7.0`）：安装 npm 包、升级 npm 包、升级 git 源插件（含其 `prepare` 构建与 `allowBuilds`）、把新包写进 `dsh.profile.bundles` 并被宿主热挂载、修复失效的 `minimumReleaseAgeExclude` 规则、scope 级 `.npmrc` 解决镜像滞后、用宿主接口做验证、写前备份。
+已实测（Windows + DSH Desktop 运行时 `0.1.7-rc.2` + 自带 pnpm `11.7.0`）：
 
-**未实测，用到时必须先向用户声明**：卸载插件、禁用/关掉插件、从备份实际回滚、纯客户端插件（只有 `dsh.client`、无宿主半边）的完整生命周期、Creator 模式的 `plugin_manager` 工具路径、macOS/Linux 上的行为。碰到这些场景，正确做法是走 GUI 或在动手前把不确定性说清楚。
+| 路径 | 实测内容 |
+|---|---|
+| 安装 npm 包 | 装进 profile 并确认宿主 `live` |
+| 升级 npm 包 | 含镜像滞后时用 scope 级 `.npmrc` 绕过 |
+| 升级 git 源插件 | 含 `prepare` 构建与 `allowBuilds` 键 |
+| 启用 | 写进 `dsh.profile.bundles`，宿主热挂载，无需重启 |
+| **停用** | 移出 `dsh.profile.bundles`：宿主数秒内卸下该行，状态变 `disabled`、`bundle:false`、进入 `unbundled`；**依赖与 `node_modules` 文件保留**；无需重启 |
+| **卸载** | 按官方顺序（先停用 → 再 `pnpm remove`）：依赖、`installed`、`activation`、`node_modules`、`unbundled` 全部回到基线，其余插件仍 `live` |
+| **从备份回滚** | 在一次真实损坏（manifest 写坏、宿主丢失整个插件列表）后恢复三个文件，宿主自动回到"全 live、无诊断、与基线逐字节一致" |
+| 策略与镜像 | 修复失效的 `minimumReleaseAgeExclude`、scope 级 `.npmrc`、`allowBuilds` 键 |
+| 验证 | 用宿主接口与日志判定结果，而不是看文件在不在 |
+
+演练对象是一份**本地临时 bundle**（自己的空实现，`file:` 源）。**未验证**：停用/卸载**第三方**（npm / git 源）插件时插件自身的副作用、**顺序颠倒**（仍启用着就 `pnpm remove`）、纯客户端插件（只有 `dsh.client`、无宿主半边）的完整生命周期、Creator 模式的 `plugin_manager` 工具路径、macOS/Linux 上的行为。碰到这些场景，先把不确定性说清楚，再考虑走 GUI。
 
 ## 阶段 0 — 先要权限
 
@@ -87,6 +99,10 @@ node $pnpm view '<pkg>' versions --json           # 有哪些版本
 
 把将要改的文件复制到会话工作区里一个带时间戳的目录：`package.json`、`pnpm-lock.yaml`、`pnpm-workspace.yaml`（有 `.npmrc` 也复制）。同时记下回滚命令。**`cordis.patch.yml` 不要纳入"我要改的文件"**——那是用户的配置层（插件的开关与配置行），客户端自己会写它。
 
+**回滚怎么做（已实测）**：把这三个文件复制回去就行——宿主会自己重读清单。实测在一次真实损坏（`package.json` 非法、插件列表全空）后，恢复后立刻回到"全 live、无诊断、与基线逐字节一致"。回滚后如果 `node_modules` 里还留着一个已不在依赖表里的目录，直接删掉（下一次 pnpm 操作也会清理它）。
+
+**改 manifest 的唯一正确姿势**：结构化编辑（JSON 解析后改字段再写回，或用精确文本替换整行），**改完立刻解析校验**。手写字符串拼 JSON 是本技能演练中唯一一次真正的破坏来源。
+
 ## 阶段 5 — 安装 npm 包（要最新版就别用裸名）
 
 关键事实：pnpm 有一条 24 小时"新发布隔离"策略（`minimumReleaseAge`，默认 1440 分钟）。
@@ -144,14 +160,24 @@ node $pnpm add --config.minimum-release-age=0 'github:<owner>/<repo>#<sha>'    #
 - **替换已装插件的文件（升级）需要重启宿主**才能加载新的模块代；运行中的进程仍持有旧代码。不要在没重启的情况下声称"新功能已生效"。
 - 永远不要为了生效去改用户的 `cordis.patch.yml`（改它只会引入意外）。
 
-### 卸载 / 禁用（本技能未实测，优先走 GUI）
+### 停用 / 卸载（顺序已实测）
 
-这两条路径没有在真实环境演练过。只有在用户明确要求、且 GUI 不可用时才尝试，并且先把不确定性讲清楚：
+**停用**（保留依赖，只是不再加载）：
 
-- **先禁用，再移除**：官方顺序是先把包名从 `dsh.profile.bundles` 移除（宿主卸下它的运行时贡献），**再** `pnpm remove <pkg>`。次序颠倒会让运行中的实例先丢文件。
-- **禁用 ≠ 卸载**：只从 `bundles` 移除就是停用，依赖仍在磁盘上（`/dsh-market/installed` 会把它报成 `unbundled`）。
-- **可能仍要重启**：进程可能已加载过它的模块，重启后再看 `activation` 里是否真的消失。
-- 交付时说清「我按官方顺序做了，但这条路径我没有验证过」，并保留写前备份。
+1. 把包名从 `package.json` 的 `dsh.profile.bundles` 移除。**用结构化 JSON 编辑，不要做字符串拼接**（原因见下面的教训）。
+2. 数秒后查 `/dsh-market/installed`：该包 `state` 变 `disabled`（原因串："已停用(市场开关或补丁层),重启后保持关闭"）、`bundle:false`、`hot:false`，并出现在 `unbundled` 里；依赖与 `node_modules` 里的文件都还在。**不需要重启。**
+3. 想恢复：把包名加回 `bundles`，秒级回到 `live`。
+
+**卸载**（官方顺序：先停用，再移除）：
+
+1. 先按上面的步骤把它移出 `bundles`。次序颠倒会让运行中的实例先丢文件（这一条按官方说明执行，本技能未单独演练颠倒的情形）。
+2. `node $pnpm remove --config.minimum-release-age=0 <pkg>`
+3. 复验：`installed` 不再有它、`activation` 不再有它、`unbundled` 为空、`node_modules/<pkg>` 已消失、其余插件仍 `live`、`diagnostics` 为 0。**实测无需重启。**
+
+### 两条被演练撞出来的真实教训
+
+- **写坏 `package.json` = 整个插件列表消失。** 用字符串/正则拼 JSON 很容易漏一个逗号或引号；清单一旦非法，宿主就读不出任何插件——市场接口的 `installed`、`activation`、`bundles` 会同时变空（本次演练真的发生过）。**改完立刻**用 `ConvertFrom-Json`（或 `JSON.parse`）校验；坏了就从阶段 4 的备份恢复。
+- **Windows 上 pnpm 可能报 `EPERM … rename 'package.json.<随机数>' -> 'package.json'`。** 宿主或监视器短暂占用文件时会发生。这一次 `pnpm add` 是**完全失败**的——依赖根本没写进去，别按"退出码非 0 但仍装上了"来理解。处置：稍等片刻重试同一条命令；若这次操作已经改坏了清单，用备份恢复。
 
 ## 阶段 8 — 验证（要有可观测证据）
 
@@ -181,6 +207,8 @@ node $pnpm add --config.minimum-release-age=0 'github:<owner>/<repo>#<sha>'    #
 | `this desktop operation is not supported by the official plugin manager` | 桌面端 profile 不接受该操作（市场/CLI 路径） | 走 GUI 的「插件」页，或用本技能直接写 profile |
 | `profile "desktop" is managed exclusively by the Electron application` | CLI 被设计性拒绝 | 不要用 CLI 管理桌面端 profile |
 | 下载超时（`codeload` / `[23] operation was aborted due to timeout`） | GitHub 直连不稳 | 加长等待重试：`--fetch-timeout=600000 --fetch-retries=6` |
+| `EPERM … rename 'package.json.<随机数>' -> 'package.json'` | Windows 上 pnpm 的原子改名撞上文件占用 | 这条命令是**整体失败**的（依赖没写进去）：稍等再重试；若清单已被改坏，用备份恢复 |
+| 市场接口的 `installed` / `activation` / `bundles` 同时为空 | `package.json` 非法（多半是被手写坏的） | 立刻解析校验；从备份恢复三个文件，宿主会自行重读 |
 | 插件装了但界面没变化 | 运行中进程仍持旧模块 | 重启 DSH；替换文件不会热换模块代 |
 
 ## 一句话流程
