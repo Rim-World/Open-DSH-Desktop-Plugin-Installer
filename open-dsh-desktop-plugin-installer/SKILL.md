@@ -1,0 +1,170 @@
+---
+name: open-dsh-desktop-plugin-installer
+description: 为 DSH Desktop（Electron 客户端）的 profile 安装、升级、卸载、启用插件——当 GUI 自己做不到、或必须精确控制版本时使用。桌面端 profile 由客户端独占：`dsh plugin --profile desktop` 被明确拒绝，dsh-market 对 git 源的插件一律拒绝，所以只能「按 profile 的真实语义写文件 + 跑它自己的 pnpm」。触发场景：用户说「装/更新/卸载 DSH 插件」「插件装不上」「更新失败」「插件市场目录加载失败」，或 pnpm 报 ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION / NO_MATCHING_VERSION / ERR_PNPM_IGNORED_BUILDS / Lockfile failed supply-chain policy，或要装指定版本、要给 GitHub 源的插件更新，或要求别重复安装。Install, update, enable or remove a plugin in a DSH Desktop profile, and repair pnpm supply-chain / registry / build-approval failures.
+whenToUse: 目标是 DSH Desktop 的插件生命周期操作，而官方 GUI / 市场 / CLI 走不通或需要版本级控制时。
+---
+
+# Open DSH Desktop Plugin Installer
+
+DSH Desktop 的插件不是"复制一个目录"就完事的：一个插件要同时存在于三处——**依赖**（`package.json` 的 `dependencies`）、**启用**（`dsh.profile.bundles` 列表）、**落盘**（`node_modules`）。官方面板做这三步；当它做不到时，本技能按同样的语义手工完成，并且每一步都可验证、可回滚。
+
+先读 `references/profile-layout.md` 了解目录与文件职责；涉及 pnpm 报错时读 `references/pnpm-supply-chain.md`；需要可观测证据时读 `references/verification.md`。`scripts/profile-report.mjs` 一条命令给出当前 profile 的完整快照（只读，先跑它）。
+
+## 何时走哪条路（按优先级）
+
+| 场景 | 走这里 |
+|---|---|
+| 普通安装（npm 包、GUI 能用） | GUI：侧边栏/设置 →「插件」→ Add plugin（支持 npm 名、git 地址、tarball、本地绝对路径；内含 inspect、注册表选择、回滚、热挂载） |
+| 会话在 Creator 模式 | `plugin_manager` 工具（`install_bundle` / `remove_bundle` / `set_bundle_enabled`），要求 `danger-full-access` 或逐次批准 |
+| GUI 拒绝、需要精确版本、git 源更新、pnpm 报策略错 | **本技能**（直接操作 profile） |
+| 只想让某个插件开关 | 改 `dsh.profile.bundles`，或 GUI 的开关；不要动用户的 `cordis.patch.yml` 配置行 |
+
+市场（dsh-market）不是安装通道：它只装自己精选目录里的插件，检测到有 agent 在跑时直接拒绝安装，且对 git 源（`github:`）在桌面端一律拒绝（其日志写 `this desktop operation is not supported by the official plugin manager`）。它可以当**观测工具**（见下）。
+
+## 阶段 0 — 先要权限
+
+直接写 profile 需要完整文件权限（profile 在 `~/.dsh` 下，位于会话工作区之外，`workspace-write` 会被文件沙箱拒绝）。
+
+- 先向用户申请 `danger-full-access`（或对每条命令单独批准），并说明原因：要写 `%DSH_HOME%\profiles\<profile>`、要跑 profile 自己的 pnpm、要改 `package.json`。不要用"绕过去"的手法尝试。
+- 权限到手前只做只读侦察。
+
+## 阶段 1 — 侦察（只读）
+
+```powershell
+node scripts/profile-report.mjs            # 自动定位 DSH_HOME / profile / 运行时版本
+```
+
+要点：
+
+- **profile 目录**：`$env:DSH_PROFILE_DIR`（会话已给）；否则 `$env:DSH_HOME\profiles\<profile>`。桌面端固定叫 `desktop`。
+- **宿主运行时版本**（决定兼容性，别拿 CLI 的版本当它）：`<安装目录>\resources\runtime\primary-runtime\runtime.json` 的 `desktopVersion`；asar 内 `dsh/package.json` 的 `version` 是同一件事。
+- **pnpm 用 profile 自带的那个**：`<安装目录>\resources\runtime\pnpm\bin\pnpm.mjs`，用 PATH 上的 `node` 跑（`node <pnpm.mjs> …`）。不要用系统 npm/pnpm 去装 profile 依赖，也不要在 profile 目录外跑。
+- **`dsh plugin --profile desktop` 是被拒绝的**（启动器硬编码该 profile 归 Electron 客户端所有）。不要浪费时间去试它或用 `--dump-config`。
+- 看有没有别的插件操作正在跑：`<profile>\.plugin-manager\run.json` 存在就等它结束再动。
+- 先把「用户装了哪些插件、各自版本/来源」记下来，便于事后比对（`profile-report.mjs` 会打印）。
+
+## 阶段 2 — 兼容性预检（写之前必须做）
+
+装一个和宿主不兼容的插件会连累整棵树。拿到 spec 后先问 registry 要元数据：
+
+```powershell
+node $pnpm view '<pkg>@<version>' engines peerDependencies dsh --json
+node $pnpm view '<pkg>' versions --json           # 有哪些版本
+```
+
+逐项判定：
+
+1. **`engines.dsh`** 必须包含宿主运行时版本（例如宿主 `0.1.7-rc.2`，插件要求 `>=0.1.7-rc.2 <0.2.0` ✓）。
+2. **`dsh.bundle.patch`** 存在才是一个"bundle 插件"（`dsh.plugin.json` 不是 loader 契约，仅作者自用）。
+3. **`peerDependencies` 里的宿主包**（`@deepseek-ai/*`）由 profile 的模块 fallback 提供：`%DSH_HOME%\profiles\node_modules\@deepseek-ai\*`。有些宿主包**只存在于宿主进程内**、profile 里解析不到（例如 `@deepseek-ai/dsh-agent-preset-registry`）；如果插件只是通过 `ctx.<service>` 用它，就没问题——**判断标准是它是否真的 `import` 该包**，读一遍 `lib/*.js` 的 import。
+4. **服务契约**：宿主插件可导出 `inject = [...]`；确认宿主提供这些服务（常见：`systemPrompt`、`tools`、`agentPresets`、`skill`）。
+5. **解析探针**（最能提前发现"装上就炸"）：在插件目录放一个临时 `.mjs`，用 `import.meta.resolve()` 和动态 `import()` 验证它的真实依赖能解析、模块能加载；验证完删掉。
+
+## 阶段 3 — 网络与镜像（先解决，别等中途失败）
+
+- **registry 滞后**：`node $pnpm config get registry` 看当前镜像（国内机器常是 `registry.npmmirror.com`）。镜像对新发布有滞后；当目标版本镜像还没有、而 `package.json` 已钉住它时，**每一次走默认镜像的 pnpm 操作都会 `ERR_PNPM_NO_MATCHING_VERSION`**（连无关的 git 插件更新也会被挡住）。
+  解法：在 profile 里放一个 `.npmrc`，**只给该 scope** 指官方源：
+
+  ```
+  @scope:registry=https://registry.npmjs.org/
+  ```
+
+  作用域规则的优先级高于 `--registry`，所以 GUI/市场（它们会显式传 `--registry`）也一并受益。
+- **GitHub**：`api.github.com` 一般可用；`codeload.github.com` 直连**时好时坏**（会挂到超时）。pnpm 用不了 `gh-proxy` 这类"路径前缀代理"，所以正确做法不是换 URL，而是**加长等待并重试**：`--fetch-timeout=600000 --fetch-retries=6`。下载大 tarball 时给足时间（含它自己的 `prepare` 构建，几分钟是正常的）。
+- **dsh-market 报「插件目录加载失败 / The operation was aborted due to timeout」**：那是它自己取目录/来源超时，不是插件坏了。可切区域（设置 → 插件市场 → 高级 → 区域 → 国内：目录走腾讯 npm 镜像、GitHub 走 gh-proxy），或稍后重试。
+- **GitHub 来源的插件**：先用 `git ls-remote https://github.com/<owner>/<repo> HEAD` 或 `GET https://api.github.com/repos/<owner>/<repo>/commits?per_page=1` 拿到目标提交 sha，后面 registry 与 `allowBuilds` 都要用它。
+
+## 阶段 4 — 备份（写之前）
+
+把将要改的文件复制到会话工作区里一个带时间戳的目录：`package.json`、`pnpm-lock.yaml`、`pnpm-workspace.yaml`（有 `.npmrc` 也复制）。同时记下回滚命令。**`cordis.patch.yml` 不要纳入"我要改的文件"**——那是用户的配置层（插件的开关与配置行），客户端自己会写它。
+
+## 阶段 5 — 安装 npm 包（要最新版就别用裸名）
+
+关键事实：pnpm 有一条 24 小时"新发布隔离"策略（`minimumReleaseAge`，默认 1440 分钟）。
+
+- **裸名安装会静默降级**：`pnpm add <pkg>` 在隔离期内会挑"够老的"那个版本，退出码仍是 0——你以为装的是 latest，其实是上一版。
+- **要最新版就必须两件事一起做**：① 显式钉版本；② 把该版本写进 `minimumReleaseAgeExclude`（否则 lockfile 的供应链校验会拦住**之后所有**操作，包括 GUI 和市场的）。
+- **`minimumReleaseAgeExclude` 一个包名只能有一条规则**！pnpm 的版本策略只取"第一个匹配到包名的规则"，同一包名的第二条及以后**完全不生效**。多版本用 `||` 并成一条：
+
+  ```yaml
+  minimumReleaseAgeExclude:
+    - dsh-opencode-go@0.1.12||0.1.14||0.1.15
+    - '@scope/pkg@1.2.3||1.2.4'
+  ```
+
+- **一次性绕过**（它的存在就是为了让 install 能起步）：
+
+  ```powershell
+  node $pnpm add --config.minimum-release-age=0 '<pkg>@<exact-version>'
+  ```
+
+  这个"绕过"和上面的"豁免条目"是两件事：前者让**本次**命令能跑（否则 lockfile 里任何一条年轻条目都会让校验失败），后者让**以后**的 GUI/市场操作不再被拦。都要做。
+
+- 装完立刻核对：`package.json` 的版本、`node_modules/<pkg>/package.json` 的版本、以及**其它插件的入口文件是否还在**（pnpm 会整体重解包依赖树，偶尔会让某个插件的构建产物"回到原始状态"）。
+- 版本选择优先级：用户点名的版本 > 官方 registry 的 `latest` > 镜像能给的成熟版本。镜像还没有最新版时，不要用"降级"糊弄过去——用阶段 3 的 scope `.npmrc` 解决。
+
+## 阶段 6 — 安装 git 依赖（GitHub 源）
+
+```powershell
+node $pnpm add --config.minimum-release-age=0 'github:<owner>/<repo>'          # 跟随默认分支 HEAD
+node $pnpm add --config.minimum-release-age=0 'github:<owner>/<repo>#<sha>'    # 钉提交
+```
+
+- 这类包的 `prepare` 脚本会真的执行（要用它自己的 devDependencies 构建），所以：
+  - 先算好它将被解包成的**精确 tarball URL**：`https://codeload.github.com/<owner>/<repo>/tar.gz/<sha>`（就是阶段 3 拿到的 HEAD sha）；
+  - 在 `pnpm-workspace.yaml` 的 `allowBuilds` 里给出**精确键**：
+
+    ```yaml
+    allowBuilds:
+      dshmarket@https://codeload.github.com/<owner>/<repo>/tar.gz/<sha>: true
+    ```
+
+  - 若 pnpm 报 `ERR_PNPM_IGNORED_BUILDS`，或它自己往文件里写了 `…: set this to true or false` 的占位符，把值改成 `true` 后重跑。
+- 给足超时（几个 GB 的 devDeps + 构建，5–10 分钟是正常的）。构建失败就看它打印的构建日志，别急着换版本。
+- 更新完成后，旧提交的 `allowBuilds` 键在 `pnpm-lock.yaml` 不再引用它（可 `Select-String` 搜旧 sha，应为 0 次）时再删，保持文件干净。
+
+## 阶段 7 — 启用并让它生效
+
+依赖装好**不等于**插件启用。启用 = 把包名加进 `package.json` 的 `dsh.profile.bundles`（追加到末尾；顺序就是层叠优先级）：
+
+```json
+"dsh": { "profile": { "bundles": [ "...", "@scope/pkg" ] } }
+```
+
+- 桌面端会监听 manifest 并**热挂载**新增的 bundle 行（可以用阶段 8 的接口立刻确认，不必重启）。
+- **替换已装插件的文件（升级）需要重启宿主**才能加载新的模块代；运行中的进程仍持有旧代码。不要在没重启的情况下声称"新功能已生效"。
+- 永远不要为了生效去改用户的 `cordis.patch.yml`（改它只会引入意外）。
+
+## 阶段 8 — 验证（要有可观测证据）
+
+优先用宿主自己给出的状态，而不是"文件在不在"：见 `references/verification.md`。至少做到：
+
+1. `GET http://127.0.0.1:<port>/dsh-market/installed` → 目标插件 `state: "live"`、`bundle: true`，`unbundled` 为空、`diagnostics.findings` 为空。这是**宿主 Loader 的实况**（它按"有活着的 fiber"判定），比读文件强。
+2. `GET /dsh-market/api/v1/updates/summary` → 确认已装版本与上游版本一致（`updatable` 不再包含它）；注意它**有缓存**，外部改动后需要一次使缓存失效的操作（例如重设同一区域）才会刷新。
+3. 文件级：版本号正确、入口文件存在、解析探针能 `import()`。
+4. 策略级：把当前真实文件复制到临时目录跑 `node <pnpm.mjs> install --lockfile-only`，应输出 `✓ Lockfile passes supply-chain policies`。这样验证的是"以后 GUI/市场操作不会再被拦"。
+5. 市场日志（`<profile>\.dsh-market\log.ndjson`）与插件管理器日志（`<profile>\.plugin-manager\logs\*\pnpm.log`）是排错的第一现场，出错时先读它们，而不是猜。
+
+任何一步失败：用阶段 4 的备份恢复 manifest/lockfile（pnpm 下载残留的文件可以留，下次操作会清理），然后如实报告实际状态。
+
+## 阶段 9 — 交付与幂等
+
+- **幂等**：动手前先查 profile-report 的输出——已经装了且已启用、版本满足要求，就**只报告、不重装**；用户明确说"别重复安装"时更是如此。
+- 报告里要写清：装/升到了哪个版本（或哪个提交）、是否已 live、**是否需要重启**才生效、改了哪几个文件、备份在哪、怎么回滚。
+- 如果这次的改动同时修好了用户的既有故障（例如某条豁免规则失效导致的全局阻塞），一并说明——用户需要知道"为什么之前装不上"。
+
+## 常见报错 → 处置
+
+| 报错 | 含义 | 处置 |
+|---|---|---|
+| `ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION`（`Lockfile failed supply-chain policy check`） | lockfile 里有年轻条目且未被豁免；它会拦住一切操作 | 本次命令加 `--config.minimum-release-age=0`；把该版本并进 `minimumReleaseAgeExclude`（**同一包名只留一条**，多个版本用 `||`） |
+| `ERR_PNPM_NO_MATCHING_VERSION` | 当前 registry 没有这个版本（镜像滞后 / 装错源） | 查多个 registry；给该 scope 配 `.npmrc` 指向官方源 |
+| `ERR_PNPM_IGNORED_BUILDS` / `set this to true or false` | git 依赖的构建脚本未被允许 | 在 `allowBuilds` 写精确 tarball 键（值 `true`）后重跑 |
+| `this desktop operation is not supported by the official plugin manager` | 桌面端 profile 不接受该操作（市场/CLI 路径） | 走 GUI 的「插件」页，或用本技能直接写 profile |
+| `profile "desktop" is managed exclusively by the Electron application` | CLI 被设计性拒绝 | 不要用 CLI 管理桌面端 profile |
+| 下载超时（`codeload` / `[23] operation was aborted due to timeout`） | GitHub 直连不稳 | 加长等待重试：`--fetch-timeout=600000 --fetch-retries=6` |
+| 插件装了但界面没变化 | 运行中进程仍持旧模块 | 重启 DSH；替换文件不会热换模块代 |
+
+## 一句话流程
+
+要权限 → 读 profile/运行时/已装清单 → 查兼容性（engines/peers/服务/探针）→ 解决 registry 与 GitHub 链路 → 备份 → 钉版本安装（绕过 + 豁免）→ 需要时补 `allowBuilds` → 写进 `dsh.profile.bundles` → 用宿主的接口验证 live → 报告是否需要重启。
