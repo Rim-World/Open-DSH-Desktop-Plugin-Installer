@@ -13,6 +13,8 @@ pnpm 11 默认启用"新发布隔离"：默认 **1440 分钟（24 小时）** �
    `✗ Lockfile failed supply-chain policy check` / `ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION`
    处失败——**包括 GUI 与市场发起的操作**。这是最容易被误判成"插件市场坏了"的一类故障。
 
+   **注意顺序：pnpm 先把新版本写进 lockfile，然后才做校验。** 所以哪怕只有**一次**更新失败，那条年轻条目也已经留在 lockfile 里了——这就是"我更新 A 插件失败，为什么 B 插件、GUI、市场全都动不了"的答案。修法只有把那条条目豁免掉（或回滚 lockfile），而不是去修 B 插件。
+
 ```text
 ✗ Lockfile failed supply-chain policy check (271 entries in 742ms)
 [ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION] 1 lockfile entries failed verification:
@@ -56,6 +58,8 @@ minimumReleaseAgeExclude:
 
 **这个坑会自己长出来**：pnpm 自己不满足时会往 `pnpm-workspace.yaml` **追加**一行豁免（GUI 装新版、市场更新都会触发），于是同一包名下就有了多条——第二条起全部失效，下一次操作立刻又报违规。**每次安装/更新后检查这个文件是否有同名的多行，有就并成一条。**
 
+**版本差异提醒（未实测，先验证再用）**：上面"用 `||` 并成一条"的结论是在客户端自带的 pnpm **11.7.0** 上实测出来的。第三方插件 `dshmarket` 自己的源码注释声称 pnpm **12.4.1** 反而会拒绝这种联合写法、更希望看到**裸包名**。如果哪天客户端自带的 pnpm 升到 12.x，先在临时目录上实测联合写法是否还被接受，再决定用哪种写法——不要照搬本文。
+
 ### 不受隔离影响的情况
 
 git / tarball 依赖不走 registry 解析，**不做**新发布检查；只有 registry 包（npm 上的）受它约束。
@@ -69,6 +73,12 @@ node $pnpm --dir <临时目录> install --lockfile-only
 ```
 
 看到 `✓ Lockfile passes supply-chain policies` 才算修好（这一步同时证明后续 GUI/市场操作不会再被拦）。
+
+**只读替代（用户只是问"怎么修"、或本次不允许写盘时）**：下面三步都不写盘，足以定位并给出修法——真正改写文件前再按阶段 0 征得许可。
+
+1. 读 `<profile>\.plugin-manager\logs\*\pnpm.log` 最近一次失败的原文：它会**点名**是哪个包、哪个版本、发布时间与截止时间；
+2. 用 packument 的 `time` 字段核对该版本的发布时间是否落在 24 小时内：`https://<registry>/<urlencoded-name>` 的 `time[<version>]`；
+3. 检查 `pnpm-workspace.yaml` 的 `minimumReleaseAgeExclude` 是否有同名多行（"明明写过豁免还是被拦"就是这个）。
 
 ## 2. Registry 与镜像滞后
 

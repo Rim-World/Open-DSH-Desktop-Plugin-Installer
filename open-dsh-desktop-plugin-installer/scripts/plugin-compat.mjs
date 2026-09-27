@@ -380,14 +380,15 @@ for (const target of targets) {
   field('  peer 依赖', peers.length ? peers.map(([n, r]) => `${n}@${r}`).join('\n' + ' '.repeat(26)) : '(无)');
 
   // ---- 类型判定
+  // 文档里 dsh.client.platform 的取值是 'web'；桌面端与网页端都通过同一套 web 客户端协议，
+  // 所以 'web' 说明"两端都在加载路径上"，而别的取值需要作者确认。
+  const oddPlatform = client?.platform && client.platform !== 'web' ? client.platform : null;
   let typeVerdict;
-  if (patch && client) typeVerdict = '宿主 + 浏览器半边（两端都可用，装后要实测 live）';
+  if (patch && client && oddPlatform) typeVerdict = `宿主 + 浏览器半边（但 platform="${oddPlatform}" 不是文档化的 "web"——浏览器半边支持哪个客户端需要确认）`;
+  else if (patch && client) typeVerdict = '宿主 + 浏览器半边（两端都在加载路径上；装后要实测 live）';
   else if (patch) typeVerdict = '只有宿主半边（没有界面部分）';
   else if (client) typeVerdict = '只有浏览器半边（需要 patch 行把它挂成 Loader row，否则不生效）';
   else typeVerdict = '普通依赖（无 dsh.bundle.patch → 官方文档：可安装但不激活任何层）';
-  if (client && client.platform && client.platform !== 'web') {
-    typeVerdict += ` ⚠️ platform="${client.platform}" 不是文档化的 "web"，需要确认它支持哪个客户端`;
-  }
 
   // ---- 版本判定
   const dshOk = enginesDsh && anchor ? satisfies(enginesDsh, anchor, semver) : null;

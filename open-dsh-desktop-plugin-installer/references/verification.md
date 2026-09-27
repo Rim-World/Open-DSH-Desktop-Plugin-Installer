@@ -22,6 +22,8 @@ $j.activation.PSObject.Properties | ForEach-Object { "{0,-32} {1,-8} bundle={2} 
 
 | 字段 | 含义 |
 |---|---|
+| `installed` | **一张表**：`包名 → 声明/锁定的版本`（装了哪些从这里看）。**不是数组、也不含状态** |
+| `present` | 包名数组（装了哪些的另一种视图） |
 | `activation.<pkg>.state` | `live` = **Loader 里存在有活 fiber 的条目**（真在跑）；`restart` = 在 bundle 层但这次没挂上，重启生效；`inert` = 只是普通依赖（库）；`broken` = 声明了 dsh 元数据但入口产物缺失/加载失败；`disabled` = 被开关或补丁层关掉 |
 | `.bundle` | 是否在 `dsh.profile.bundles` 里 |
 | `.hot` | 是否经由热挂载（无需重启）而 live |
@@ -29,6 +31,8 @@ $j.activation.PSObject.Properties | ForEach-Object { "{0,-32} {1,-8} bundle={2} 
 | `diagnostics.findings` | 清单层的诊断（应为空） |
 | `live` | 市场自己的热挂载列表（正常为空） |
 | `bundles` | 当前启用的 bundle 列表（不含客户端内置的） |
+
+判断"清单是不是坏了"要看 **`activation` + `bundles` + `present` 同时为空**（只有这组能观测到 manifest 非法）；单看 `installed` 为空没有意义。
 
 **注意**：`live` 只说明"这一行挂着"。**替换了插件文件（升级）后它依然显示 live**，因为进程持有的是旧模块代——那种情况必须重启，别用 `live` 反推"新版本已生效"。
 
@@ -101,6 +105,14 @@ catch (e) { console.log('entry FAIL', e.code ?? e.message); }
 node "<profile>\node_modules\<pkg>\.probe.mjs"; Remove-Item "<profile>\node_modules\<pkg>\.probe.mjs"
 ```
 
+**功能冒烟（零风险、不用写盘）**：带 `dsh.plugin.json` 的包会在里面声明 `contributes.tools` / `contributes.skills`。把自己会话里**实际可用**的工具表 / 技能目录对着它核一遍：
+
+```powershell
+(Get-Content <profile>\node_modules\<pkg>\dsh.plugin.json -Raw | ConvertFrom-Json).contributes
+```
+
+工具在、技能在 → 说明宿主半边真的挂上了；这比 `state: live` 有力得多，而且是只读操作。两个前提：① `dsh.plugin.json` 是**作者的元数据，官方 loader 并不读它**（契约是 `package.json` 的 `dsh.bundle.patch`），所以它只是线索；② 只对"提供工具/技能"的插件有效，纯界面插件没有这条通路（那类只能人工看界面）。
+
 ## 6. 策略级检查（保证以后 GUI 也能装）
 
 把**当前真实文件**复制到工作区一个临时目录，跑一次离线解析：
@@ -118,7 +130,8 @@ node $pnpm --dir $sc install --lockfile-only
 
 - [ ] `node_modules\<pkg>` 版本 = 目标版本（或 git 提交 = 目标 sha）
 - [ ] `dsh.profile.bundles` 含该包名（启用）
-- [ ] `/dsh-market/installed`：`state=live`、`bundle=true`、`unbundled` 空、`diagnostics` 空
+- [ ] `/dsh-market/installed`：`activation.<pkg>.state=live`、`bundle=true`、`unbundled` 空、`diagnostics` 空（`installed` 是"包名 → 版本"的表，`present` 是名字数组，别当成状态用）
+- [ ] 功能冒烟：`dsh.plugin.json` 的 `contributes.*` 能在自己的工具表 / 技能目录里对上（适用时；纯界面插件跳过）
 - [ ] `/dsh-market/api/v1/updates/summary`（缓存失效后）：该包不在 `updatable` 里
 - [ ] 离线 `install --lockfile-only` 通过（后续 GUI/市场操作不被拦）
 - [ ] 其它插件仍 live、入口文件仍在

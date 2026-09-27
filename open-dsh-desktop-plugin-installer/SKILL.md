@@ -19,7 +19,7 @@ DSH Desktop 的插件不是"复制一个目录"就完事的：一个插件要同
 
 | 场景 | 走这里 |
 |---|---|
-| 「这个插件支持我的版本吗 / 它是给桌面端还是网页端的」 | 阶段 2：`scripts/plugin-compat.mjs` 出结论，**汇报给用户由用户决定** |
+| 「这个插件支持我的版本吗 / 它是给桌面端还是网页端的」 | 阶段 2：`scripts/plugin-compat.mjs` 出结论，**汇报给用户由用户决定**。已经装着且已启用时，转阶段 9 只报告、不重装 |
 | 普通安装（npm 包、GUI 能用） | GUI：侧边栏/设置 →「插件」→ Add plugin（支持 npm 名、git 地址、tarball、本地绝对路径；内含 inspect、注册表选择、回滚、热挂载） |
 | 会话在 Creator 模式 | `plugin_manager` 工具（`install_bundle` / `remove_bundle` / `set_bundle_enabled`），要求 `danger-full-access` 或逐次批准 |
 | GUI 拒绝、需要精确版本、git 源更新、pnpm 报策略错 | **本技能**（直接操作 profile） |
@@ -55,6 +55,7 @@ DSH Desktop 的插件不是"复制一个目录"就完事的：一个插件要同
 
 - 先向用户申请 `danger-full-access`（或对每条命令单独批准），并说明原因：要写 `%DSH_HOME%\profiles\<profile>`、要跑 profile 自己的 pnpm、要改 `package.json`。不要用"绕过去"的手法尝试。
 - 权限到手前只做只读侦察。
+- **用户只是问"为什么会失败 / 怎么修"时，不要顺手去修**：停在"只读侦察 + 诊断 + 修法"，把要不要动手交给他。阶段 1、阶段 2、阶段 3 的诊断部分，以及 `pnpm-supply-chain.md` 的只读替代，全都不需要写权限。
 
 ## 阶段 1 — 侦察（只读）
 
@@ -76,10 +77,12 @@ node scripts/profile-report.mjs            # 自动定位 DSH_HOME / profile / �
 装一个和宿主不兼容的插件会连累整棵树；更麻烦的是**加载器不强制 `engines.dsh`**——范围不满足的插件也可能装得上、显示 live，但功能就是不对。所以这一段是**写盘前的决定门**；判定规则、汇报模板与排错见 `references/compatibility.md`。
 
 ```powershell
-node scripts/plugin-compat.mjs --spec '<pkg>@<version|tag>'   # 装之前（需要网络，约 1–2 秒）
-node scripts/plugin-compat.mjs --installed <pkg>              # 已经装着的这一份（离线）
-node scripts/plugin-compat.mjs --dir <本地目录|checkout>       # 本地源（离线）
+node scripts/plugin-compat.mjs --installed <pkg>              # ① 先看已经装着的这一份（离线，零成本）
+node scripts/plugin-compat.mjs --dir <本地目录|checkout>       # ② 本地源（离线）
+node scripts/plugin-compat.mjs --spec '<pkg>@<version|tag>'   # ③ 最后才查 registry（需要网络，约 1–2 秒）
 ```
+
+**先走 ①**：如果它**已经装着、已经启用、版本又正好是要的那个**，那就没有"装不装"可决定了——直接转阶段 9，**只报告，不重装**（用户说"别重复安装"时尤其如此）。只有确实要新装/升级/换版本时，才用 ③ 去问 registry。
 
 它一次给出四件事：插件声明的 `engines.dsh` / `engines.node` / peer；它是哪一类（宿主半边 / 浏览器半边 / 两者 / **普通依赖**）；**目标客户端自己的**版本；以及 `✅ 兼容` / `⚠️ 未知` / `❌ 不兼容`。退出码 `0` / `3` / `4` / `1`，`--json` 给机器读。
 
@@ -199,8 +202,9 @@ node $pnpm add --config.minimum-release-age=0 'github:<owner>/<repo>#<sha>'    #
 1. `GET http://127.0.0.1:<port>/dsh-market/installed` → 目标插件 `state: "live"`、`bundle: true`，`unbundled` 为空、`diagnostics.findings` 为空。这是**宿主 Loader 的实况**（它按"有活着的 fiber"判定），比读文件强。
 2. `GET /dsh-market/api/v1/updates/summary` → 确认已装版本与上游版本一致（`updatable` 不再包含它）；注意它**有缓存**，外部改动后需要一次使缓存失效的操作（例如重设同一区域）才会刷新。
 3. 文件级：版本号正确、入口文件存在、解析探针能 `import()`。
-4. 策略级：把当前真实文件复制到临时目录跑 `node <pnpm.mjs> install --lockfile-only`，应输出 `✓ Lockfile passes supply-chain policies`。这样验证的是"以后 GUI/市场操作不会再被拦"。
-5. 市场日志（`<profile>\.dsh-market\log.ndjson`）与插件管理器日志（`<profile>\.plugin-manager\logs\*\pnpm.log`）是排错的第一现场，出错时先读它们，而不是猜。
+4. **功能冒烟（零风险、不用改盘）**：如果插件包里有 `dsh.plugin.json`，把它 `contributes.tools` / `contributes.skills` 列出的东西**对着自己会话的工具表 / 技能目录核一遍**——工具在、技能在，就说明宿主半边真的挂上了，比 `state: live` 强得多。注意 `dsh.plugin.json` 是**作者自用的元数据，官方 loader 并不读它**（loader 认 `package.json` 的 `dsh.bundle.patch`），所以它只能当线索，不能当契约。
+5. 策略级：把当前真实文件复制到临时目录跑 `node <pnpm.mjs> install --lockfile-only`，应输出 `✓ Lockfile passes supply-chain policies`。这样验证的是"以后 GUI/市场操作不会再被拦"。
+6. 市场日志（`<profile>\.dsh-market\log.ndjson`）与插件管理器日志（`<profile>\.plugin-manager\logs\*\pnpm.log`）是排错的第一现场，出错时先读它们，而不是猜。
 
 任何一步失败：用阶段 4 的备份恢复 manifest/lockfile（pnpm 下载残留的文件可以留，下次操作会清理），然后如实报告实际状态。
 
@@ -214,7 +218,7 @@ node $pnpm add --config.minimum-release-age=0 'github:<owner>/<repo>#<sha>'    #
 
 | 报错 | 含义 | 处置 |
 |---|---|---|
-| `ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION`（`Lockfile failed supply-chain policy check`） | lockfile 里有年轻条目且未被豁免；它会拦住一切操作 | 本次命令加 `--config.minimum-release-age=0`；把该版本并进 `minimumReleaseAgeExclude`（**同一包名只留一条**，多个版本用 `||`） |
+| `ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION`（`Lockfile failed supply-chain policy check`） | lockfile 里有年轻条目且未被豁免。pnpm **先写 lockfile、再校验**，所以哪怕只有一次更新失败，那条年轻条目也已经留在 lockfile 里——它会拦住一切操作（含无关插件、GUI、市场） | 本次命令加 `--config.minimum-release-age=0`；把该版本并进 `minimumReleaseAgeExclude`（**同一包名只留一条**，多个版本用 `||`）。不要去"修"被连累的其它插件 |
 | `ERR_PNPM_NO_MATCHING_VERSION` | 当前 registry 没有这个版本（镜像滞后 / 装错源） | 查多个 registry；给该 scope 配 `.npmrc` 指向官方源 |
 | `ERR_PNPM_IGNORED_BUILDS` / `set this to true or false` | git 依赖的构建脚本未被允许 | 在 `allowBuilds` 写精确 tarball 键（值 `true`）后重跑 |
 | `this desktop operation is not supported by the official plugin manager` | 桌面端 profile 不接受该操作（市场/CLI 路径） | 走 GUI 的「插件」页，或用本技能直接写 profile |
