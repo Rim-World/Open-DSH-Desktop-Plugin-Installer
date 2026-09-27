@@ -42,10 +42,11 @@ Windows 安装目录通常在 `%LOCALAPPDATA%\Programs\DeepSeek Harness`；macOS
 
 ## 模块解析（为什么 peer 不用装）
 
-profile 里的插件 `import '@deepseek-ai/dsh-tools'` 时，Node 会一路向上找到 `%DSH_HOME%\profiles\node_modules\@deepseek-ai\dsh-tools`——那是指向**安装目录**的软链（打包发行版里则是 ESM proxy 文件）。启动时宿主会"治愈"这些 fallback（`healProfilesModuleFallback`），所以：
+profile 里的插件 `import '@deepseek-ai/dsh-tools'` 时，Node 会一路向上找到 `%DSH_HOME%\profiles\node_modules\@deepseek-ai\dsh-tools`——一个 **junction / 软链**（打包发行版里则是 ESM proxy 文件）。要点：
 
-- 大多数 `@deepseek-ai/*` peer 在 profile 里**能**解析；
-- 少数包（例如 `@deepseek-ai/dsh-agent-preset-registry`）只在宿主进程内存在，profile 解析会 `ERR_MODULE_NOT_FOUND`——**这不一定代表插件会坏**：只要插件是通过 `ctx.<service>` 用它（peer 只用于类型/服务名），运行时没问题。判断依据是插件的实际 `import` 语句。
+- **它指向哪一份，取决于谁创建或"治愈"了它，不一定是你正在跑的那个宿主。** 本机实测：这些 junction 全部创建于 2026-08-13，指向 npm 全局的 CLI 安装 `%APPDATA%\npm\node_modules\@deepseek-ai\dsh`（**0.1.5-rc.3**），而桌面端跑的是 **0.1.7-rc.2**；桌面端 22:39 启动后并没有改变它们。
+- 所以：peer **能解析**（大多数 `@deepseek-ai/*` 在 profile 里找得到），但**它的版本不能当兼容性判据**——要求 `>=0.1.7-rc.2` peer 的 `@klarkxy/dsh-dev-index@0.1.4` 在这台机器上照样 `live`、工具可用。判版本请用目标客户端自己的运行时版本（见 `compatibility.md`）。
+- 少数包（例如 `@deepseek-ai/dsh-agent-preset-registry`）不以文件形式存在于任何地方，只在宿主进程内——profile 里解析会 `ERR_MODULE_NOT_FOUND`。**这不一定代表插件会坏**：只要插件是通过 `ctx.<service>` 用它（peer 只用于类型/服务名），运行时没问题。判断依据是插件的实际 `import` 语句。
 - `autoInstallPeers: false` 是关键：pnpm 不会去 npm 上找这些宿主包（npm 上也没有），所以**不要**把 `autoInstallPeers` 打开。
 
 ## 三条安装通道与它们的边界

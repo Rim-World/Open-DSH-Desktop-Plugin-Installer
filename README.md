@@ -1,8 +1,17 @@
 # Open-DSH-Desktop-Plugin-Installer
 
-一个给 **DSH Desktop（DeepSeek Harness 桌面客户端）** 用的 Agent Skill：当客户端自带的插件面板做不到、或你需要对版本有精确控制时，**安装 / 升级 / 启用 / 停用 / 卸载 DSH 插件**，并在 pnpm 的供应链策略、镜像滞后、git 依赖构建白名单把安装挡住时给出处置；清单被改坏或安装失败时按备份回滚。
+一个给 **DSH Desktop（DeepSeek Harness 桌面客户端）** 用的 Agent Skill。
 
-范围以实测为准：停用、卸载、从备份回滚这三条路径都用一份本地临时 bundle 完整跑过（含各自的观测判据，见「覆盖范围」）。仍**未验证**的是：顺序颠倒地卸载（仍启用着就移除）、第三方插件自身的副作用、纯客户端插件的完整生命周期、Creator 模式的 `plugin_manager` 路径、macOS/Linux。
+它做两件事，顺序不能颠倒：
+
+1. **先核对、再问人**：拿到一个插件，先判断它**声明支持什么版本**、它是**哪一类**插件（宿主半边 / 浏览器半边 / 普通依赖 / 没有 bundle 契约所以装了也不生效），以及**你实际在用的客户端**是 Desktop 还是网页端、什么版本，把结论汇报给你，**由你决定装不装**。
+2. **在客户端自带的插件面板做不到时，按 profile 的真实语义把操作做完**：安装、升级、启用、停用、卸载，并在 pnpm 的供应链策略、镜像滞后、git 依赖构建白名单把安装挡住时给出处置；清单被改坏或安装失败时按备份回滚。
+
+**范围以实测为准，这一点比功能列表更重要：**
+
+- 生效范围只有 **DSH Desktop 的 `desktop` profile**（在 Windows 上验证过）。它不替代官方 GUI，也不是通用的 DSH 插件管理器。
+- 上面五个动作的**证据强度不一样**：*安装 / 升级*是在真实第三方插件上做的（npm 包与 git 源都有）；*启用 / 停用 / 卸载 / 从备份回滚*是用一份**本地临时 bundle**（自己的空实现）完整演练出来的，**没有在第三方插件上验证副作用**——第三方插件停用/卸载时会不会牵出别的问题，本技能不做保证。
+- 仍未验证：顺序颠倒地卸载（仍启用着就移除）、纯客户端插件（只有浏览器半边）的完整生命周期、Creator 模式的 `plugin_manager` 路径、macOS/Linux，以及类型结论之后的**功能冒烟**（"在加载路径上"不等于"功能一定正常"）。
 
 DSH Desktop 的 profile 由 Electron 客户端独占，因此：
 
@@ -14,10 +23,11 @@ DSH Desktop 的 profile 由 Electron 客户端独占，因此：
 
 ## 覆盖范围
 
-**已实测**（2026-09-27，Windows + DSH Desktop 运行时 `0.1.7-rc.2` + 自带 pnpm `11.7.0`）：
+**已实测**（2026-09-27 ～ 09-28，Windows + DSH Desktop 运行时 `0.1.7-rc.2` + 自带 pnpm `11.7.0`）：
 
 | 路径 | 实测内容 |
 |---|---|
+| **兼容性核对（版本 + 类型）** | 对「已装插件 / 本地目录 / registry 元数据」三类目标判定 `engines.dsh`、`engines.node`、插件类型与 peer 旁证；用合成的 `engines.dsh=">=0.2.0 <0.3.0"` 包验证了 ❌ 分支与退出码 `3`、未知分支退出码 `4`；registry 路径约 1.2 s。同时实测确认：PATH 上的 `dsh` CLI 是 `0.1.5-rc.3` 而桌面端运行时是 `0.1.7-rc.2`，共享模块 fallback 指向的也是 CLI 那一份——**两者都不能当桌面端的兼容性判据** |
 | 安装 npm 包 | 装 `@klarkxy/dsh-dev-index@0.1.3` 并在宿主里确认 `live` |
 | 升级 npm 包 | 升到 `0.1.4`（遇到镜像未同步，用 scope 级 `.npmrc` 解决） |
 | 升级 git 源插件 | `dsh-better-sidebar`、`dshmarket`（1.65.1 → 1.66.2），含它们的 `prepare` 构建与 `allowBuilds` 键 |
@@ -36,6 +46,7 @@ DSH Desktop 的 profile 由 Electron 客户端独占，因此：
 | 顺序颠倒地卸载（仍启用着就 `pnpm remove`） | 未演练；按官方说明应先停用再移除 |
 | 第三方（npm / git 源）插件停用或卸载时的自身副作用 | 未验证（演练对象是本地 `file:` 临时 bundle） |
 | 纯客户端插件（`dsh.client`、无宿主半边）的完整生命周期 | 未验证 |
+| 类型结论之后的功能冒烟 | 未验证：`dsh.client.platform: "web"` 只说明"在加载路径上"，装完仍要用 `live` + 实际功能确认 |
 | Creator 模式的 `plugin_manager` 工具路径 | 未使用（本机会话没有该工具） |
 | macOS / Linux | 技能里的路径探测覆盖了它们，但只在 Windows 上跑过 |
 | 与技能中枢的「从仓库导入 + 上游更新跟踪」整合 | 未验证（本地是按普通用户技能放置的） |
@@ -50,8 +61,9 @@ DSH Desktop 的 profile 由 Electron 客户端独占，因此：
 
 ## 能力清单
 
+- **兼容性核对（先做这个）**：一条命令给出插件声明的 `engines.dsh` / `engines.node` / peer、它是哪一类插件（宿主半边 / 浏览器半边 / 普通依赖），以及**目标客户端自己的**版本（Desktop 读 `runtime.json` 的 `desktopVersion`，网页端读 CLI 版本），最后是 `兼容 / 未知 / 不兼容` 三档结论加退出码——结论交给用户决定，不替他拍板。实测踩过的坑也写进去了：PATH 上的 CLI 版本、共享模块 fallback 的版本都**不能**当桌面端的判据。
 - **按 profile 的真实语义操作**：依赖（`dependencies`）、启用（`dsh.profile.bundles`）、落盘（`node_modules`）三处一次对齐，并区分「装了」与「启用了」。
-- **兼容性预检**：用宿主真实运行时版本（`runtime.json` 的 `desktopVersion`）核对插件的 `engines.dsh` / `peerDependencies` / 服务契约，并用解析探针在安装前验证依赖真的能加载。
+- **区分"没生效"的两种原因**：没有 `dsh.bundle.patch` 的包装上也不会激活任何层（只是普通依赖）；替换已装插件的文件不会替换内存里的模块代（要重启）。
 - **绕开 pnpm 的 24 小时隔离与静默降级**：要最新版就显式钉版本 + 写豁免；一次性绕过（`--config.minimum-release-age=0`）与持久豁免的区别讲清楚。
 - **修掉那个会自己长出来的坑**：`minimumReleaseAgeExclude` 里同一包名的多条规则只有第一条生效，必须用 `||` 并成一条——技能会检查并在报告里直接指出。
 - **镜像滞后处置**：给单个 scope 配 `.npmrc` 指向官方源，且不影响其它包（作用域规则优先于 `--registry`，GUI 与市场同样受益）。
@@ -69,10 +81,12 @@ DSH Desktop 的 profile 由 Electron 客户端独占，因此：
     ├── SKILL.md                          # 主流程（触发条件、阶段、覆盖范围、报错处置表）
     ├── references/
     │   ├── profile-layout.md             # profile 目录/文件职责、模块解析、三条安装通道的边界
+    │   ├── compatibility.md              # 版本/类型/客户端三方核对、汇报模板、决定门、排错
     │   ├── pnpm-supply-chain.md          # 24h 隔离、豁免并集、registry scope、构建白名单、超时重试
     │   └── verification.md               # 可观测判据：本地接口、日志、探针、成功清单
     └── scripts/
-        └── profile-report.mjs            # 只读快照：profile/运行时/已装清单/策略地雷（无依赖）
+        ├── profile-report.mjs            # 只读快照：profile/运行时/已装清单/策略地雷（无依赖）
+        └── plugin-compat.mjs             # 只读兼容性核对：声明范围 / 插件类型 / 客户端版本 → 结论与退出码
 ```
 
 ## 安装
@@ -106,6 +120,18 @@ node open-dsh-desktop-plugin-installer/scripts/profile-report.mjs
 
 它会打印：profile 与运行时版本、每个依赖的规格与落盘版本、`dsh.profile.bundles` 的启用状态、`allowBuilds` 与 `minimumReleaseAgeExclude` 的可疑规则、市场最近的错误事件，以及一个 **attention** 汇总（例如「装了但没启用」「豁免规则重复导致失效」「占位符没填」）。
 
+要装某个插件之前，再跑兼容性核对（这一条才是"该不该装"的判据）：
+
+```bash
+# 装之前：从 registry 读元数据（约 1–2 秒）
+node open-dsh-desktop-plugin-installer/scripts/plugin-compat.mjs --spec '@scope/plugin-name'
+# 已经装着的这一份 / 本地 checkout（离线）
+node open-dsh-desktop-plugin-installer/scripts/plugin-compat.mjs --installed plugin-name
+node open-dsh-desktop-plugin-installer/scripts/plugin-compat.mjs --dir ./some-plugin
+```
+
+输出：插件声明支持的版本范围、它是哪一类插件、你实际在用的客户端是什么版本，以及 `✅ 兼容 / ⚠️ 未知 / ❌ 不兼容`（退出码 `0/3/4`，`+ --json` 给机器读）。**不兼容时技能默认不装**，会先把冲突项讲清楚再让你选。
+
 ## 前置条件
 
 - 一台装了 **DSH Desktop** 的机器（Electron 客户端；技能用客户端自带的 pnpm：`<安装目录>/resources/runtime/pnpm/bin/pnpm.mjs`）。
@@ -125,6 +151,8 @@ node open-dsh-desktop-plugin-installer/scripts/profile-report.mjs
 
 [MIT](./LICENSE) © 2026 Rim-World
 
-## 生成说明
+## 版本与生成说明
 
-本仓库的 README 与其中的技能内容（`SKILL.md`、`references/`、`scripts/`）由 **DeepSeek-V4.1-Flash** 生成，直接来自一次真实的 DSH 桌面端插件安装/更新过程的经验沉淀；「覆盖范围」一节按当时的实际操作记录，未做过的路径均已标注。
+- **技能版本 `0.2.0`**，见 `SKILL.md` frontmatter 的 `metadata.version`；本机安装的那一份应与本仓库 `main` 的同一提交一致。
+- `0.2.0` 相对 `0.1.x` 的新增：阶段 2 从"看一眼 engines/peers"改成完整的**兼容性核对 + 用户决定门**（版本 / 类型 / 客户端三方核对），配套 `scripts/plugin-compat.mjs` 与 `references/compatibility.md`；并修正了共享模块 fallback 的说明——**它的版本不能当兼容性判据**（实测它指向的是 CLI 那一份，而不是正在运行的桌面端运行时）。
+- 本仓库的 README 与其中的技能内容（`SKILL.md`、`references/`、`scripts/`）由 **DeepSeek-V4.1-Flash** 生成，直接来自真实 DSH 桌面端插件安装/更新过程的经验沉淀；「覆盖范围」一节按实际操作记录，未做过的路径均已标注。

@@ -1,19 +1,25 @@
 ---
 name: open-dsh-desktop-plugin-installer
-description: 为 DSH Desktop（Electron 客户端）的 profile 安装、升级、启用、停用、卸载插件，并在 pnpm 供应链策略、镜像滞后、git 构建白名单把安装挡住时给出处置；改坏清单或安装失败时按备份回滚。桌面端 profile 由客户端独占：`dsh plugin --profile desktop` 被明确拒绝，dsh-market 对 git 源的插件一律拒绝，所以只能「按 profile 的真实语义写文件 + 跑它自己的 pnpm」。触发场景：用户说「装/更新/停用/卸载 DSH 插件」「插件装不上」「更新失败」「插件市场目录加载失败」，或 pnpm 报 ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION / NO_MATCHING_VERSION / ERR_PNPM_IGNORED_BUILDS / Lockfile failed supply-chain policy / EPERM rename，或要装指定版本、要给 GitHub 源的插件更新，或要求别重复安装。Install, update, enable, disable or remove a plugin in a DSH Desktop profile, and repair pnpm supply-chain / registry / build-approval failures.
-whenToUse: 目标是 DSH Desktop 的插件生命周期操作，而官方 GUI / 市场 / CLI 走不通或需要版本级控制时。
+description: 在 DSH Desktop（Electron 客户端）的 profile 上完成插件的安装、升级、启用、停用、卸载与回滚——动手前先核对「插件声明支持的版本与类型（宿主半边 / 浏览器半边 / 普通依赖）对比你实际在用的客户端（Desktop 还是 WebUI、什么版本）」，把结论汇报给用户、由用户决定；再处置 pnpm 供应链策略、镜像滞后、git 构建白名单把安装挡住的情况，改坏清单或安装失败时按备份回滚。适用范围就是桌面端 profile；其中停用、卸载、从备份回滚只在一次本地临时 bundle 的完整演练里验证过，未做过的路径都会在报告里明说。桌面端 profile 由客户端独占：`dsh plugin --profile desktop` 被明确拒绝，dsh-market 对 git 源的插件一律拒绝，所以只能「按 profile 的真实语义写文件 + 跑它自己的 pnpm」。触发场景：用户说「装/更新/停用/卸载 DSH 插件」「这个插件能不能装」「它支持我这个版本吗」「它是桌面端还是网页端的」「插件装不上」「更新失败」「插件市场目录加载失败」，或 pnpm 报 ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION / NO_MATCHING_VERSION / ERR_PNPM_IGNORED_BUILDS / Lockfile failed supply-chain policy / EPERM rename，或要装指定版本、要给 GitHub 源的插件更新，或要求别重复安装。Check a plugin's declared version range and type against the running DSH Desktop client before installing, then install / update / enable / disable / remove it in a DSH Desktop profile and repair pnpm supply-chain, registry and build-approval failures.
+whenToUse: 目标是 DSH Desktop 的插件生命周期操作（含「这个插件能不能装到我这台机器上」这类先验问题），而官方 GUI / 市场 / CLI 走不通或需要版本级控制时。
+metadata:
+  version: "0.2.0"
+  upstream: https://github.com/Rim-World/Open-DSH-Desktop-Plugin-Installer
+  updated: "2026-09-28"
+  scope: "DSH Desktop (Electron) profile, Windows; 停用/卸载/回滚只在本地临时 bundle 上演练过——见「覆盖范围」"
 ---
 
 # Open DSH Desktop Plugin Installer
 
 DSH Desktop 的插件不是"复制一个目录"就完事的：一个插件要同时存在于三处——**依赖**（`package.json` 的 `dependencies`）、**启用**（`dsh.profile.bundles` 列表）、**落盘**（`node_modules`）。官方面板做这三步；当它做不到时，本技能按同样的语义手工完成，并且每一步都可验证、可回滚。
 
-先读 `references/profile-layout.md` 了解目录与文件职责；涉及 pnpm 报错时读 `references/pnpm-supply-chain.md`；需要可观测证据时读 `references/verification.md`。`scripts/profile-report.mjs` 一条命令给出当前 profile 的完整快照（只读，先跑它）。
+先读 `references/profile-layout.md` 了解目录与文件职责；涉及 pnpm 报错时读 `references/pnpm-supply-chain.md`；要判断「这个插件能不能装到我这个客户端」时读 `references/compatibility.md` 并跑 `scripts/plugin-compat.mjs`；需要可观测证据时读 `references/verification.md`。`scripts/profile-report.mjs` 一条命令给出当前 profile 的完整快照（只读，先跑它）。
 
 ## 何时走哪条路（按优先级）
 
 | 场景 | 走这里 |
 |---|---|
+| 「这个插件支持我的版本吗 / 它是给桌面端还是网页端的」 | 阶段 2：`scripts/plugin-compat.mjs` 出结论，**汇报给用户由用户决定** |
 | 普通安装（npm 包、GUI 能用） | GUI：侧边栏/设置 →「插件」→ Add plugin（支持 npm 名、git 地址、tarball、本地绝对路径；内含 inspect、注册表选择、回滚、热挂载） |
 | 会话在 Creator 模式 | `plugin_manager` 工具（`install_bundle` / `remove_bundle` / `set_bundle_enabled`），要求 `danger-full-access` 或逐次批准 |
 | GUI 拒绝、需要精确版本、git 源更新、pnpm 报策略错 | **本技能**（直接操作 profile） |
@@ -30,6 +36,7 @@ DSH Desktop 的插件不是"复制一个目录"就完事的：一个插件要同
 
 | 路径 | 实测内容 |
 |---|---|
+| **兼容性核对（版本 + 类型）** | 对已装插件、本地目录、registry（`--spec`，约 1.2 s）三类目标判定 `engines.dsh` / `engines.node` / 类型（宿主半边 / 浏览器半边 / 普通依赖）/ peer 旁证；用一个合成的 `engines.dsh=">=0.2.0 <0.3.0"` 包验证了 ❌ 分支与退出码 `3`，`⚠️ 未知` 走退出码 `4` |
 | 安装 npm 包 | 装进 profile 并确认宿主 `live` |
 | 升级 npm 包 | 含镜像滞后时用 scope 级 `.npmrc` 绕过 |
 | 升级 git 源插件 | 含 `prepare` 构建与 `allowBuilds` 键 |
@@ -40,7 +47,7 @@ DSH Desktop 的插件不是"复制一个目录"就完事的：一个插件要同
 | 策略与镜像 | 修复失效的 `minimumReleaseAgeExclude`、scope 级 `.npmrc`、`allowBuilds` 键 |
 | 验证 | 用宿主接口与日志判定结果，而不是看文件在不在 |
 
-演练对象是一份**本地临时 bundle**（自己的空实现，`file:` 源）。**未验证**：停用/卸载**第三方**（npm / git 源）插件时插件自身的副作用、**顺序颠倒**（仍启用着就 `pnpm remove`）、纯客户端插件（只有 `dsh.client`、无宿主半边）的完整生命周期、Creator 模式的 `plugin_manager` 工具路径、macOS/Linux 上的行为。碰到这些场景，先把不确定性说清楚，再考虑走 GUI。
+演练对象是一份**本地临时 bundle**（自己的空实现，`file:` 源）。**未验证**：停用/卸载**第三方**（npm / git 源）插件时插件自身的副作用、**顺序颠倒**（仍启用着就 `pnpm remove`）、纯客户端插件（只有 `dsh.client`、无宿主半边）的完整生命周期、Creator 模式的 `plugin_manager` 工具路径、macOS/Linux 上的行为，以及类型结论之后的**功能冒烟**——"两端都在加载路径上"不等于"功能一定正常"。碰到这些场景，先把不确定性说清楚，再考虑走 GUI。
 
 ## 阶段 0 — 先要权限
 
@@ -64,22 +71,28 @@ node scripts/profile-report.mjs            # 自动定位 DSH_HOME / profile / �
 - 看有没有别的插件操作正在跑：`<profile>\.plugin-manager\run.json` 存在就等它结束再动。
 - 先把「用户装了哪些插件、各自版本/来源」记下来，便于事后比对（`profile-report.mjs` 会打印）。
 
-## 阶段 2 — 兼容性预检（写之前必须做）
+## 阶段 2 — 兼容性核对：版本 + 类型 + 客户端，然后交给用户决定
 
-装一个和宿主不兼容的插件会连累整棵树。拿到 spec 后先问 registry 要元数据：
+装一个和宿主不兼容的插件会连累整棵树；更麻烦的是**加载器不强制 `engines.dsh`**——范围不满足的插件也可能装得上、显示 live，但功能就是不对。所以这一段是**写盘前的决定门**；判定规则、汇报模板与排错见 `references/compatibility.md`。
 
 ```powershell
-node $pnpm view '<pkg>@<version>' engines peerDependencies dsh --json
-node $pnpm view '<pkg>' versions --json           # 有哪些版本
+node scripts/plugin-compat.mjs --spec '<pkg>@<version|tag>'   # 装之前（需要网络，约 1–2 秒）
+node scripts/plugin-compat.mjs --installed <pkg>              # 已经装着的这一份（离线）
+node scripts/plugin-compat.mjs --dir <本地目录|checkout>       # 本地源（离线）
 ```
 
-逐项判定：
+它一次给出四件事：插件声明的 `engines.dsh` / `engines.node` / peer；它是哪一类（宿主半边 / 浏览器半边 / 两者 / **普通依赖**）；**目标客户端自己的**版本；以及 `✅ 兼容` / `⚠️ 未知` / `❌ 不兼容`。退出码 `0` / `3` / `4` / `1`，`--json` 给机器读。
 
-1. **`engines.dsh`** 必须包含宿主运行时版本（例如宿主 `0.1.7-rc.2`，插件要求 `>=0.1.7-rc.2 <0.2.0` ✓）。
-2. **`dsh.bundle.patch`** 存在才是一个"bundle 插件"（`dsh.plugin.json` 不是 loader 契约，仅作者自用）。
-3. **`peerDependencies` 里的宿主包**（`@deepseek-ai/*`）由 profile 的模块 fallback 提供：`%DSH_HOME%\profiles\node_modules\@deepseek-ai\*`。有些宿主包**只存在于宿主进程内**、profile 里解析不到（例如 `@deepseek-ai/dsh-agent-preset-registry`）；如果插件只是通过 `ctx.<service>` 用它，就没问题——**判断标准是它是否真的 `import` 该包**，读一遍 `lib/*.js` 的 import。
-4. **服务契约**：宿主插件可导出 `inject = [...]`；确认宿主提供这些服务（常见：`systemPrompt`、`tools`、`agentPresets`、`skill`）。
-5. **解析探针**（最能提前发现"装上就炸"）：在插件目录放一个临时 `.mjs`，用 `import.meta.resolve()` 和动态 `import()` 验证它的真实依赖能解析、模块能加载；验证完删掉。
+判据要点（都有实测依据，别改）：
+
+1. **锚点只能是目标客户端的版本**：Desktop 读 `runtime.json` 的 `desktopVersion`，WebUI 读运行该 profile 的 CLI 版本。本机 PATH 上的 `dsh` 是 `0.1.5-rc.3` 而桌面端运行时是 `0.1.7-rc.2`——拿 CLI 版本判断桌面端必然错。共享 fallback 里的 `@deepseek-ai/*` 版本**也不是**判据（本机它指向 CLI 那一份，而 peer 要求 `>=0.1.7-rc.2` 的 dev-index 照样 live）。
+2. **缺声明 = 未知，不是不兼容**：本机 10 个第三方插件里只有 2 个声明了 `engines.dsh`。如实说"未知"，别拍胸脯。
+3. **没有 `dsh.bundle.patch` 就不是 bundle 插件**：官方文档明说这类包可以安装，但只作普通依赖、**不激活任何层**。"装了完全没反应"多半是这个原因。
+4. **`dsh.client.platform` 是 `web`**，不代表"只支持 WebUI"——桌面端本身就是"web 客户端 + 宿主"。类型结论只说明"在加载路径上"；**"能用"必须装完用宿主的 `state: live` 实测**。
+5. **peer 只看插件是否真的 `import` 它**：只通过 `ctx.<service>` 引用的（例如 `@deepseek-ai/dsh-agent-preset-registry`，profile 里解析不到），没问题。
+6. **解析探针**（本地目录/已有 checkout 时最有用）：在插件目录放一个临时 `.mjs`，用 `import.meta.resolve()` 和动态 `import()` 验证它的真实依赖能解析、模块能加载；验证完删掉。它回答"装上会不会立刻炸"，与"该不该装"互补。
+
+**然后停下，把结论汇报给用户**，给三个选项：① 按计划安装 ② 换一个满足范围的版本（`--spec <name>@<版本>` 重新核对）③ 取消。**不兼容时默认不安装**；用户明知风险仍要装，就写清风险、先备份（阶段 4）、装完立刻验证（阶段 8），并把"已知不兼容但仍安装"写进最终报告。**不要替用户决定。**
 
 ## 阶段 3 — 网络与镜像（先解决，别等中途失败）
 
@@ -209,8 +222,10 @@ node $pnpm add --config.minimum-release-age=0 'github:<owner>/<repo>#<sha>'    #
 | 下载超时（`codeload` / `[23] operation was aborted due to timeout`） | GitHub 直连不稳 | 加长等待重试：`--fetch-timeout=600000 --fetch-retries=6` |
 | `EPERM … rename 'package.json.<随机数>' -> 'package.json'` | Windows 上 pnpm 的原子改名撞上文件占用 | 这条命令是**整体失败**的（依赖没写进去）：稍等再重试；若清单已被改坏，用备份恢复 |
 | 市场接口的 `installed` / `activation` / `bundles` 同时为空 | `package.json` 非法（多半是被手写坏的） | 立刻解析校验；从备份恢复三个文件，宿主会自行重读 |
+| `engines.dsh` 不包含当前客户端版本 | 作者声明的支持范围与你的客户端不符（加载器不会替你拦） | 先跑 `plugin-compat.mjs`，把冲突项讲清楚，让用户选：换版本 / 换插件 / 明知风险仍安装（备份 + 装后立刻验证） |
+| 插件装上、也 live，但**完全没反应** | 这个包没有 `dsh.bundle.patch`（不是 bundle 插件，只是普通依赖），或它的浏览器半边没有 patch 行把它挂成 Loader row | 官方文档：这类包可以安装，但不激活任何层。别当"装好了"，回去看作者的安装说明 |
 | 插件装了但界面没变化 | 运行中进程仍持旧模块 | 重启 DSH；替换文件不会热换模块代 |
 
 ## 一句话流程
 
-要权限 → 读 profile/运行时/已装清单 → 查兼容性（engines/peers/服务/探针）→ 解决 registry 与 GitHub 链路 → 备份 → 钉版本安装（绕过 + 豁免）→ 需要时补 `allowBuilds` → 写进 `dsh.profile.bundles` → 用宿主的接口验证 live → 报告是否需要重启。
+要权限 → 读 profile / 运行时 / 已装清单 → **核对兼容性（引擎范围、插件类型、客户端版本）并汇报给用户、由用户决定** → 解决 registry 与 GitHub 链路 → 备份 → 钉版本安装（绕过 + 豁免）→ 需要时补 `allowBuilds` → 写进 `dsh.profile.bundles` → 用宿主的接口验证 live → 报告是否需要重启。
