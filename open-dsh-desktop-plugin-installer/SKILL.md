@@ -1,6 +1,6 @@
 ---
 name: open-dsh-desktop-plugin-installer
-description: 为 DSH Desktop（Electron 客户端）的 profile 安装、升级、卸载、启用插件——当 GUI 自己做不到、或必须精确控制版本时使用。桌面端 profile 由客户端独占：`dsh plugin --profile desktop` 被明确拒绝，dsh-market 对 git 源的插件一律拒绝，所以只能「按 profile 的真实语义写文件 + 跑它自己的 pnpm」。触发场景：用户说「装/更新/卸载 DSH 插件」「插件装不上」「更新失败」「插件市场目录加载失败」，或 pnpm 报 ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION / NO_MATCHING_VERSION / ERR_PNPM_IGNORED_BUILDS / Lockfile failed supply-chain policy，或要装指定版本、要给 GitHub 源的插件更新，或要求别重复安装。Install, update, enable or remove a plugin in a DSH Desktop profile, and repair pnpm supply-chain / registry / build-approval failures.
+description: 为 DSH Desktop（Electron 客户端）的 profile 安装、升级、启用插件——当 GUI 自己做不到、或必须精确控制版本时使用。桌面端 profile 由客户端独占：`dsh plugin --profile desktop` 被明确拒绝，dsh-market 对 git 源的插件一律拒绝，所以只能「按 profile 的真实语义写文件 + 跑它自己的 pnpm」。触发场景：用户说「装/更新 DSH 插件」「插件装不上」「更新失败」「插件市场目录加载失败」，或 pnpm 报 ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION / NO_MATCHING_VERSION / ERR_PNPM_IGNORED_BUILDS / Lockfile failed supply-chain policy，或要装指定版本、要给 GitHub 源的插件更新，或要求别重复安装。卸载与禁用不在覆盖范围：走 GUI，本技能只记录顺序与风险并明确标注未实测。Install, update and enable a plugin in a DSH Desktop profile, and repair pnpm supply-chain / registry / build-approval failures.
 whenToUse: 目标是 DSH Desktop 的插件生命周期操作，而官方 GUI / 市场 / CLI 走不通或需要版本级控制时。
 ---
 
@@ -17,9 +17,18 @@ DSH Desktop 的插件不是"复制一个目录"就完事的：一个插件要同
 | 普通安装（npm 包、GUI 能用） | GUI：侧边栏/设置 →「插件」→ Add plugin（支持 npm 名、git 地址、tarball、本地绝对路径；内含 inspect、注册表选择、回滚、热挂载） |
 | 会话在 Creator 模式 | `plugin_manager` 工具（`install_bundle` / `remove_bundle` / `set_bundle_enabled`），要求 `danger-full-access` 或逐次批准 |
 | GUI 拒绝、需要精确版本、git 源更新、pnpm 报策略错 | **本技能**（直接操作 profile） |
-| 只想让某个插件开关 | 改 `dsh.profile.bundles`，或 GUI 的开关；不要动用户的 `cordis.patch.yml` 配置行 |
+| 只想开关某个插件 | 改 `dsh.profile.bundles`，或 GUI 的开关；不要动用户的 `cordis.patch.yml` 配置行。本技能只在「启用」方向实测过 |
+| 卸载插件 | GUI「插件」页的卸载（会先确认）。本技能**未实测**该路径，见下「覆盖范围」 |
 
 市场（dsh-market）不是安装通道：它只装自己精选目录里的插件，检测到有 agent 在跑时直接拒绝安装，且对 git 源（`github:`）在桌面端一律拒绝（其日志写 `this desktop operation is not supported by the official plugin manager`）。它可以当**观测工具**（见下）。
+
+## 覆盖范围：先说清本技能验证过什么
+
+这条规则比任何步骤都重要：**不要在没做过的路径上给用户保证**。
+
+已实测（Windows + DSH Desktop 运行时 `0.1.7-rc.2` + 自带 pnpm `11.7.0`）：安装 npm 包、升级 npm 包、升级 git 源插件（含其 `prepare` 构建与 `allowBuilds`）、把新包写进 `dsh.profile.bundles` 并被宿主热挂载、修复失效的 `minimumReleaseAgeExclude` 规则、scope 级 `.npmrc` 解决镜像滞后、用宿主接口做验证、写前备份。
+
+**未实测，用到时必须先向用户声明**：卸载插件、禁用/关掉插件、从备份实际回滚、纯客户端插件（只有 `dsh.client`、无宿主半边）的完整生命周期、Creator 模式的 `plugin_manager` 工具路径、macOS/Linux 上的行为。碰到这些场景，正确做法是走 GUI 或在动手前把不确定性说清楚。
 
 ## 阶段 0 — 先要权限
 
@@ -134,6 +143,15 @@ node $pnpm add --config.minimum-release-age=0 'github:<owner>/<repo>#<sha>'    #
 - 桌面端会监听 manifest 并**热挂载**新增的 bundle 行（可以用阶段 8 的接口立刻确认，不必重启）。
 - **替换已装插件的文件（升级）需要重启宿主**才能加载新的模块代；运行中的进程仍持有旧代码。不要在没重启的情况下声称"新功能已生效"。
 - 永远不要为了生效去改用户的 `cordis.patch.yml`（改它只会引入意外）。
+
+### 卸载 / 禁用（本技能未实测，优先走 GUI）
+
+这两条路径没有在真实环境演练过。只有在用户明确要求、且 GUI 不可用时才尝试，并且先把不确定性讲清楚：
+
+- **先禁用，再移除**：官方顺序是先把包名从 `dsh.profile.bundles` 移除（宿主卸下它的运行时贡献），**再** `pnpm remove <pkg>`。次序颠倒会让运行中的实例先丢文件。
+- **禁用 ≠ 卸载**：只从 `bundles` 移除就是停用，依赖仍在磁盘上（`/dsh-market/installed` 会把它报成 `unbundled`）。
+- **可能仍要重启**：进程可能已加载过它的模块，重启后再看 `activation` 里是否真的消失。
+- 交付时说清「我按官方顺序做了，但这条路径我没有验证过」，并保留写前备份。
 
 ## 阶段 8 — 验证（要有可观测证据）
 
