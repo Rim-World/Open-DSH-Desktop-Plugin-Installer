@@ -6,6 +6,7 @@
 
 1. **先核对、请求权限、再问人**：拿到一个插件，先读取文本判断它**声明支持什么版本**、它是**哪一类**插件（宿主半边 / 浏览器半边 / 普通依赖 / 没有 bundle 契约所以装了也不生效），以及**用户正在用的客户端**是 Desktop 还是网页端、什么版本，把结论汇报给你，**由你决定装不装**，并向用户请求**完整文件权限**权限、说明原因。
 2. **在客户端自带的插件面板做不到时，按 profile 的真实语义把操作做完**：安装、升级、启用、停用、卸载，并在 pnpm 的供应链策略、镜像滞后、git 依赖构建白名单把安装挡住时给出处置；清单被改坏或安装失败时按备份回滚。
+3. **把「装上了」和「能用」分开算**：先核对来源装出来到底是哪个包（名字、分发通道、默认分支与发布产物的差别、校验和），再把 `state: live` 只当**宿主半边**的结论——带浏览器半边的插件要冷启动客户端才算验证过。
 
 **范围以实测为准，这一点比功能列表更重要：**
 
@@ -46,7 +47,8 @@ DSH Desktop 的 profile 由 Electron 客户端独占，因此：
 | 顺序颠倒地卸载（仍启用着就 `pnpm remove`） | 未演练；按官方说明应先停用再移除 |
 | 第三方（npm / git 源）插件停用或卸载时的自身副作用 | 未验证（演练对象是本地 `file:` 临时 bundle） |
 | 纯客户端插件（`dsh.client`、无宿主半边）的完整生命周期 | 未验证 |
-| 类型结论之后的功能冒烟 | 未验证：`dsh.client.platform: "web"` 只说明"在加载路径上"，装完仍要用 `live` + 实际功能确认 |
+| 类型结论之后的功能冒烟 | 未验证：`dsh.client.platform: "web"` 只说明"在加载路径上"，装完仍要用 `live` + 实际功能确认。**补充：`live` 只覆盖宿主半边**——带浏览器半边的插件要冷启动才算验证过；技能现在把这一点写进报告，而不是拿 `live` 顶替 |
+| 浏览器半边在冷启动时失败 | 能定位与恢复：失败落在客户端自己的启动日志（含 renderer console）里，技能给了读法与"把包名移出 `bundles` 即恢复"的处置；但**预判**只有一条离线检查可用——包名 / 装配条目名 / 客户端注册 id 三处是否自洽 |
 | Creator 模式的 `plugin_manager` 工具路径 | 未使用（本机会话没有该工具） |
 | macOS / Linux | 技能里的路径探测覆盖了它们，但只在 Windows 上跑过 |
 | 与技能中枢的「从仓库导入 + 上游更新跟踪」整合 | 未验证（本地是按普通用户技能放置的） |
@@ -69,6 +71,9 @@ DSH Desktop 的 profile 由 Electron 客户端独占，因此：
 - **镜像滞后处置**：给单个 scope 配 `.npmrc` 指向官方源，且不影响其它包（作用域规则优先于 `--registry`，GUI 与市场同样受益）。
 - **GitHub 源更新**：解析 HEAD 提交、精确的 `allowBuilds` tarball 键、构建超时与重试策略。
 - **可观测验证**：用宿主 Loader 的实况（`/dsh-market/installed` 的 `state/bundle/hot`、`unbundled`、`diagnostics`）与更新清单判定成功，而不是「文件在不在」。
+- **产物身份核对**：来源（URL / 本地 tarball / 口述包名）不等于包本身——读产物清单确认 `name` / `version` / `private` / `dsh.bundle.patch`，按作者声明的分发通道取件，核校验和，分清默认分支与发布产物，并在"改名过"的包上做**三处名字自洽**检查（包名 / 装配条目名 / 客户端注册 id）。
+- **把宿主半边与浏览器半边分开算**：`state: live` + 0 诊断只证明宿主半边；带浏览器半边的插件要**冷启动**才算验证过，否则报告里必须写明未验证。客户端起不来时去读它自己的启动日志，而不是 profile 的包操作日志。
+- **分清"客户端自带的"与"你装的"**：改动前先确定文件归谁（安装目录载荷 / profile / 用户级三层），客户端载荷里被版本清单钉住的那一份不要去替换。
 - **幂等**：动手前先查已装状态，已满足要求就只报告、不重装。
 
 ## 目录结构
@@ -80,10 +85,11 @@ DSH Desktop 的 profile 由 Electron 客户端独占，因此：
 └── open-dsh-desktop-plugin-installer/
     ├── SKILL.md                          # 主流程（触发条件、阶段、覆盖范围、报错处置表）
     ├── references/
-    │   ├── profile-layout.md             # profile 目录/文件职责、模块解析、三条安装通道的边界
+    │   ├── profile-layout.md             # 目录/文件职责、归属判据（客户端载荷 vs 用户级）、模块解析、三条安装通道的边界
     │   ├── compatibility.md              # 版本/类型/客户端三方核对、汇报模板、决定门、排错
-    │   ├── pnpm-supply-chain.md          # 24h 隔离、豁免并集、registry scope、构建白名单、超时重试
-    │   └── verification.md               # 可观测判据：本地接口、日志、探针、成功清单
+    │   ├── artifact-identity.md          # 产物身份：清单字段、分发通道、tag vs 默认分支、校验和、三处名字自洽
+    │   ├── pnpm-supply-chain.md          # 24h 隔离、豁免并集、registry scope、构建白名单、工具安装脚本被挡、超时重试
+    │   └── verification.md               # 可观测判据：本地接口、日志、探针、冷启动验证、成功清单
     └── scripts/
         ├── profile-report.mjs            # 只读快照：profile/运行时/已装清单/策略地雷（无依赖）
         └── plugin-compat.mjs             # 只读兼容性核对：声明范围 / 插件类型 / 客户端版本 → 结论与退出码
@@ -145,7 +151,7 @@ node open-dsh-desktop-plugin-installer/scripts/plugin-compat.mjs --dir ./some-pl
 - **幂等**：动手前先查已装/已启用状态；已经满足要求就只报告、不重装。
 - **写前备份，坏了能回**：改前把 `package.json` / `pnpm-lock.yaml` / `pnpm-workspace.yaml`（必要时含 `.npmrc`）备份到工作区时间戳目录。回滚已实测——一次真实损坏（清单被写坏、插件列表全空）靠恢复这三个文件回到了基线。
 - **manifest 只做结构化编辑**：演练中唯一一次真正的破坏就是把 JSON 拼错了；技能要求改完立刻解析校验（`ConvertFrom-Json` / `JSON.parse`）。
-- **如实报告**：替换已装插件的文件不会替换内存里的模块代——技能会明确说明「是否需要重启才生效」；对仍未验证的路径（顺序颠倒的卸载、第三方插件的停用/卸载副作用、非 Windows 平台）会直接告诉用户"这条我没验证过"。
+- **如实报告**：替换已装插件的文件不会替换内存里的模块代——技能会明确说明「是否需要重启才生效」；对仍未验证的路径（顺序颠倒的卸载、第三方插件的停用/卸载副作用、非 Windows 平台）会直接告诉用户"这条我没验证过"。**判据也分层**：把"别人给的来源是什么""宿主半边是否 live""浏览器半边是否冷启动过""功能是否正常"分四条分别说，不让上一条顶替下一条。
 
 ## 许可
 
@@ -153,6 +159,12 @@ node open-dsh-desktop-plugin-installer/scripts/plugin-compat.mjs --dir ./some-pl
 
 ## 版本与生成说明
 
-- **技能版本 `0.2.0`**，见 `SKILL.md` frontmatter 的 `metadata.version`；本机安装的那一份应与本仓库 `main` 的同一提交一致。
+- **技能版本 `0.3.0`**，见 `SKILL.md` frontmatter 的 `metadata.version`；本机安装的那一份应与本仓库 `main` 的同一提交一致。
+- `0.3.0` 的新增：
+  - **阶段 2.5 产物身份核对**，配一篇新参考 `references/artifact-identity.md`：读产物清单的 `name` / `version` / `private` / `dsh.bundle.patch`；按作者声明的分发通道取件；把 tag 解析成 commit 再和默认分支比；有校验和就核；bundle 插件查**三处名字自洽**（包名 / 装配条目名 / 客户端注册 id）；本地产物必须留在稳定位置并写进报告。
+  - **阶段 8 补第 7 条：冷启动验证**。带浏览器半边的插件只在客户端启动时被求值，热挂载不经过那一步，所以 `live` 只覆盖宿主半边；失败要读客户端自己的启动日志（renderer console 在里面），处置是先把包名移出 `bundles`。
+  - `references/profile-layout.md` 补**归属判据**：客户端载荷 / profile / 用户级三层，以及"载荷里被版本清单钉住的那一份不要替换"。
+  - `references/pnpm-supply-chain.md` 补**工具自身安装脚本被白名单挡住**的识别与两种处置（一次性绕过 / 持久放宽），并要求升级后跑一次真实调用而不是只看版本号。
+  - frontmatter 去掉 `updated` 字段：版本只由 `metadata.version` 承载。
 - `0.2.0` 相对 `0.1.x` 的新增：阶段 2 从"看一眼 engines/peers"改成完整的**兼容性核对 + 用户决定门**（版本 / 类型 / 客户端三方核对），配套 `scripts/plugin-compat.mjs` 与 `references/compatibility.md`；并修正了共享模块 fallback 的说明——**它的版本不能当兼容性判据**（实测它指向的是 CLI 那一份，而不是正在运行的桌面端运行时）。
 - 本仓库的 README 与其中的技能内容（`SKILL.md`、`references/`、`scripts/`）由 **DeepSeek-V4.1-Flash** 生成，直接来自真实 DSH 桌面端插件安装/更新过程的经验沉淀；「覆盖范围」一节按实际操作记录，未做过的路径均已标注。

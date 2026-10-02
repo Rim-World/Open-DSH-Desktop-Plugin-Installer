@@ -113,7 +113,42 @@ node "<profile>\node_modules\<pkg>\.probe.mjs"; Remove-Item "<profile>\node_modu
 
 工具在、技能在 → 说明宿主半边真的挂上了；这比 `state: live` 有力得多，而且是只读操作。两个前提：① `dsh.plugin.json` 是**作者的元数据，官方 loader 并不读它**（契约是 `package.json` 的 `dsh.bundle.patch`），所以它只是线索；② 只对"提供工具/技能"的插件有效，纯界面插件没有这条通路（那类只能人工看界面）。
 
-## 6. 策略级检查（保证以后 GUI 也能装）
+## 6. 冷启动验证（浏览器半边只在这一步被求值）
+
+前五步全部通过，**也只证明宿主半边**。原因很具体：
+
+- `state: live` 的判据是"这个条目有活着的 fiber"，`diagnostics` 看的是清单层——两者都由**宿主 Loader** 给出。
+- 带浏览器半边的插件（`dsh.client`）还有另一份代码，由客户端的模块系统在**客户端启动 / 页面加载**时求值。
+- **热挂载不经过那一步**：把新行写进 `dsh.profile.bundles` 时宿主当场挂上并报 `live`，而浏览器半边要等到下一次客户端启动才被求值。
+
+所以对任何带 `dsh.client` 的插件，尤其是**新启用**的那个：
+
+1. 报告里把话说清楚——"宿主半边已验证 `live`，浏览器半边**只有冷启动能证明**"。不要拿 `live` 当"能用"。
+2. 能冷启动就冷启动（让用户重启客户端），并确认客户端确实起来了。
+3. 起不来时**不要**在 profile 的日志里找原因：`.plugin-manager\logs\*`（pnpm 原始输出）和 `.dsh-market\log.ndjson`（市场事件）只覆盖**包操作**，它们会一路说"正常"。客户端启动期的失败写在**客户端自己的**日志里。
+
+### 客户端启动失败读哪里
+
+客户端把启动期错误落盘在它的用户数据目录下：
+
+```powershell
+Get-ChildItem "$env:APPDATA\@deepseek-ai\*\logs" -Force |
+  Sort-Object LastWriteTime -Descending | Select-Object -First 5 LastWriteTime,Name
+```
+
+这类文件里通常有三段，够定位了：
+
+- **谁没起来**：宿主只会说某条 entry `did not activate` / `import failed`——这是**症状**，不是原因；
+- **renderer console**：客户端启动时控制台的错误行，**真正的原因在这里**（例如某个注册键被重复注册、某个模块解析不到）；
+- **运行环境**：应用 / Electron / node 版本与 locale，用来排除"是不是环境变了"。
+
+先读这一段再下结论。宿主那句 "import failed" 很容易把人往宿主侧的依赖解析上带，而错误其实在浏览器半边。
+
+### 起不来是可以立刻恢复的
+
+把该包名从 `dsh.profile.bundles` 移出（停用），那条 entry 就不进组合，客户端立刻能起来；依赖和文件都还在，修好之后加回去即可。**不需要卸载**——停用是恢复手段，不是放弃。
+
+## 7. 策略级检查（保证以后 GUI 也能装）
 
 把**当前真实文件**复制到工作区一个临时目录，跑一次离线解析：
 
@@ -126,8 +161,10 @@ node $pnpm --dir $sc install --lockfile-only
 
 期望：`✓ Lockfile passes supply-chain policies` 且 exit 0。若不是，回到 `pnpm-supply-chain.md` 处理豁免规则。（`Copy-Item` 的目标目录必须先存在，否则 PowerShell 会把它当成文件名建出一个同名文件。）
 
-## 7. 成功清单
+## 8. 成功清单
 
+- [ ] 产物身份已核对：清单 `name` / `version` 与你要装的一致，分发通道是作者声明的那条，有校验和则已核对（见 `artifact-identity.md`）
+- [ ] bundle 插件三处名字自洽：包名 / entry `name` / 客户端注册 id
 - [ ] `node_modules\<pkg>` 版本 = 目标版本（或 git 提交 = 目标 sha）
 - [ ] `dsh.profile.bundles` 含该包名（启用）
 - [ ] `/dsh-market/installed`：`activation.<pkg>.state=live`、`bundle=true`、`unbundled` 空、`diagnostics` 空（`installed` 是"包名 → 版本"的表，`present` 是名字数组，别当成状态用）
@@ -135,4 +172,5 @@ node $pnpm --dir $sc install --lockfile-only
 - [ ] `/dsh-market/api/v1/updates/summary`（缓存失效后）：该包不在 `updatable` 里
 - [ ] 离线 `install --lockfile-only` 通过（后续 GUI/市场操作不被拦）
 - [ ] 其它插件仍 live、入口文件仍在
+- [ ] 带 `dsh.client` 的插件：已说明"浏览器半边需冷启动验证"，或已完成冷启动并读过错日志
 - [ ] 已告知用户"是否需要重启"、备份与回滚方式
