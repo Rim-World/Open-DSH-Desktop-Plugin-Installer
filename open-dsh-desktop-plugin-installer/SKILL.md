@@ -5,6 +5,7 @@ whenToUse: 目标是 DSH Desktop 的插件生命周期操作（含「这个插�
 metadata:
   version: "0.3.0"
   upstream: https://github.com/Rim-World/Open-DSH-Desktop-Plugin-Installer
+  updated: "2026-10-03"
   scope: "DSH Desktop (Electron) profile, Windows; 停用/卸载/回滚只在本地临时 bundle 上演练过——见「覆盖范围」"
 ---
 
