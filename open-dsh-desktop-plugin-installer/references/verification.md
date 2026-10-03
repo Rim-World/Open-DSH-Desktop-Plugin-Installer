@@ -4,6 +4,8 @@
 
 ## 0. 找到服务端口
 
+本节判据的前提是**桌面客户端正在运行**：客户端没开时热挂载不会发生、`/dsh-market/*` 全部不可达，只能完成文件级检查。`profile-report.mjs` 的市场探测连不上时先请用户启动客户端。
+
 `$env:DSH_WEB_URL`（例如 `http://127.0.0.1:19387`）；没有该变量时看客户端的本地服务端口。应用外壳页 `/` 需要登录态（会 401），但 `/dsh-market/*` 这些路由是**仅回环**的，无需鉴权即可读；**POST 路由要求同源**，必须带 `Origin` 与 `Referer`：
 
 ```powershell
@@ -94,10 +96,11 @@ Get-ChildItem <profile> -Recurse -File -Force | Where-Object { $_.LastWriteTime 
 ```powershell
 # 版本
 (Get-Content <profile>\node_modules\<pkg>\package.json -Raw | ConvertFrom-Json).version
-# 入口产物（bundle patch 与 main/exports 指向的文件都要在）
-Test-Path <profile>\node_modules\<pkg>\cordis.patch.yml
-# 其它插件是否被依赖树重解包搞坏
-foreach ($p in @('dsh-skill-hub','dshmarket')) { "{0} files={1}" -f $p, (Get-ChildItem "<profile>\node_modules\$p" -Recurse -File | Measure-Object).Count }
+# 入口产物：路径以清单为准（dsh.bundle.patch 与 main/exports 指向的文件都要在，不要猜文件名）
+$m = Get-Content <profile>\node_modules\<pkg>\package.json -Raw | ConvertFrom-Json
+if ($m.dsh.bundle.patch) { Test-Path ("<profile>\node_modules\<pkg>\" + $m.dsh.bundle.patch) }
+# 其它插件是否被依赖树重解包搞坏（<pkg-n> 换成两个真实存在的其它插件名）
+foreach ($p in @('<pkg-n1>','<pkg-n2>')) { "{0} files={1}" -f $p, (Get-ChildItem "<profile>\node_modules\$p" -Recurse -File | Measure-Object).Count }
 ```
 
 **解析探针**（确认插件真的能加载，而不只是文件存在）——在插件目录里放一个临时 `.mjs`，跑完删掉：
@@ -176,7 +179,7 @@ node $pnpm --dir $sc install --lockfile-only
 
 - [ ] 产物身份已核对：清单 `name` / `version` 与你要装的一致，分发通道是作者声明的那条，有校验和则已核对（见 `artifact-identity.md`）
 - [ ] 若是**换本地产物**：已下载并核作者校验和、profile 内副本哈希再核一次、lockfile 里**旧文件名 0 处引用而新文件名有条目**、旧产物仍保留可回滚（见 `update-channels.md`）
-- [ ] bundle 插件三处名字自洽：包名 / entry `name` / 客户端注册 id
+- [ ] bundle 插件五处名字自洽：包名 / entry `name` / 客户端注册 id / 浏览器半边导出名 / 宿主半边生产者标识
 - [ ] `node_modules\<pkg>` 版本 = 目标版本（或 git 提交 = 目标 sha）
 - [ ] `dsh.profile.bundles` 含该包名（启用）
 - [ ] `/dsh-market/installed`：`activation.<pkg>.state=live`、`bundle=true`、`unbundled` 空、`diagnostics` 空（`installed` 是"包名 → 版本"的表，`present` 是名字数组，别当成状态用）

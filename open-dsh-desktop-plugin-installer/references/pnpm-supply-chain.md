@@ -42,9 +42,9 @@ pnpm 的版本策略在按包名查询时**只取第一个匹配到该包名的�
 ```yaml
 # ✗ 后面两条形同没写：0.1.14 / 0.1.15 依然会被判违规
 minimumReleaseAgeExclude:
-  - dsh-opencode-go@0.1.12
-  - dsh-opencode-go@0.1.14
-  - dsh-opencode-go@0.1.15
+  - some-plugin@0.1.12
+  - some-plugin@0.1.14
+  - some-plugin@0.1.15
 ```
 
 必须用 `||` 并成一条（解析器支持精确版本并集）：
@@ -52,7 +52,7 @@ minimumReleaseAgeExclude:
 ```yaml
 # ✓
 minimumReleaseAgeExclude:
-  - dsh-opencode-go@0.1.12||0.1.14||0.1.15
+  - some-plugin@0.1.12||0.1.14||0.1.15
   - '@scope/pkg@1.2.3||1.2.4'
 ```
 
@@ -127,7 +127,7 @@ allowBuilds:
 2. 在 `allowBuilds` 写精确键，值为 `true`：
    ```yaml
    allowBuilds:
-     dshmarket@https://codeload.github.com/dsh-market/dsh-market/tar.gz/180c3144…: true
+     <name>@https://codeload.github.com/<owner>/<repo>/tar.gz/<sha>: true
    ```
 3. 重跑同一条 `pnpm add`。构建需要联网拉 devDependencies，**给足超时**（`--fetch-timeout=600000 --fetch-retries=6`），几分钟到十几分钟都属正常。
 4. 更新到新提交后，旧提交的键会被新 lockfile 弃用；确认 `pnpm-lock.yaml` 里已搜不到旧 sha（0 次）再删除旧键。
@@ -169,7 +169,7 @@ npm 会提示"命令行给出了 `--allow-scripts`，所以文件里的 `allow-s
 
 跑完一次 `pnpm add` 后，被改动的通常有：`package.json`（依赖按字母序重写）、`pnpm-lock.yaml`、必要时 `pnpm-workspace.yaml`（追加豁免/占位符）。**`dsh.profile.bundles` 不由 pnpm 维护**——启用必须你自己写。
 
-另外：pnpm 每次操作都会重解包依赖树，可能让**无关插件**的构建产物回到"未构建"状态。所以每次操作后顺手核对其它插件的入口文件仍然存在（尤其 git 源的、带 `prepare` 的）。
+另外：pnpm 每次操作都会重解包依赖树，可能让**无关插件**的构建产物回到"未构建"状态。所以每次操作后顺手核对其它插件的入口文件仍然存在（尤其 git 源的、带 `prepare` 的）。发现丢失时，对该包按依赖行里已有的 specifier 重跑一次 `pnpm add --config.minimum-release-age=0`，让它的 `prepare` 重新执行；仍失败就回滚本次操作并如实报告。
 
 ## 6. 回滚
 

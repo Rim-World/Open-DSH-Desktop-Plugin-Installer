@@ -22,13 +22,13 @@ node scripts/plugin-compat.mjs --dir <本地目录|checkout>        # 本地源�
 **两个实测到的陷阱**（都会把人带偏）：
 
 - 这台机器上 PATH 里的 CLI 是 `0.1.5-rc.3`，桌面端运行时是 `0.1.7-rc.2`。**用 CLI 版本判断桌面端是错的**，反过来也一样。同一台机器可以同时有 `desktop` 和 `web` 两个 profile，各自装着一套不同的插件、各自有不同的锚点版本。
-- **共享 fallback 的版本不是判据**：`%DSH_HOME%\profiles\node_modules\@deepseek-ai\*` 在本机指向 **CLI 那一份 0.1.5-rc.3**（junction 创建于 2026-08-13，桌面端 22:39 启动后并未改变它）。而 `@klarkxy/dsh-dev-index@0.1.4` 的 peer 要求是 `>=0.1.7-rc.2`，它在桌面端**照样 live、工具可用**。结论：fallback 只能当旁证——它能解析到什么版本，和宿主实际用哪一套并不总是一致。
+- **共享 fallback 的版本不是判据**：`%DSH_HOME%\profiles\node_modules\@deepseek-ai\*` 在本机指向 **CLI 那一份 0.1.5-rc.3**（junction 创建于 2026-08-13，桌面端 22:39 启动后并未改变它）。而某第三方插件（peer 要求 `>=0.1.7-rc.2`）在这台机器上**照样 live、工具可用**。结论：fallback 只能当旁证——它能解析到什么版本，和宿主实际用哪一套并不总是一致。
 
 ## 2. 插件声明：缺声明 = 未知，不是不兼容
 
 | 字段 | 含义 | 缺失时怎么说 |
 |---|---|---|
-| `engines.dsh` | 作者声明的宿主版本范围。**加载器不强制它**（`dsh-dev-index` 作者 README 明写"加载器不强制 `engines.dsh`"），所以不满足范围也可能装得上——这正是要先核对的原因 | "插件没声明支持范围，**未知**" |
+| `engines.dsh` | 作者声明的宿主版本范围。**加载器不强制它**（有插件作者在 README 明写"加载器不强制 `engines.dsh`"），所以不满足范围也可能装得上——这正是要先核对的原因 | "插件没声明支持范围，**未知**" |
 | `engines.node` | 对 Node 的要求；和运行时 node（本机 24.21.0）比 | 同上 |
 | `peerDependencies` 的 `@deepseek-ai/*` | 宿主包。`autoInstallPeers: false`，由共享 fallback 提供；**只有在插件真的 `import` 它时才要紧**（只通过 `ctx.<service>` 用的，解析不到也没关系） | 逐条列出范围，别下结论 |
 | `dsh.bundle.patch` | **loader 契约**：有这个才是"bundle 插件" | 没有 → 见下"普通依赖" |
