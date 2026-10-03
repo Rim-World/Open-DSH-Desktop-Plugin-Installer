@@ -43,7 +43,15 @@ $s = (Invoke-WebRequest "$base/dsh-market/status" -Headers $H -UseBasicParsing).
 "boot=$($s.boot) region=$($s.region) runningAgents=$($s.runningAgents -join ',') error=$($s.error)"
 ```
 
-- `boot`：宿主本次启动的标识。**重启后会变**——用它判断"这个改动是不是已经重启生效"或"用户刚刚重启过"。
+- `boot`：宿主本次启动的标识，形如 `<pid>-<epoch 毫秒>`。**重启后会变**——用它判断"这个改动是不是已经重启生效"或"用户刚刚重启过"。
+  - 直接和你的文件改动时间比：`boot=13012-1791015278279` 里的 `1791015278279` 就是启动时刻。**启动时间晚于你换文件的时间**，才说明这次的模块代里带上了你的改动；早于它，就还是旧代码在跑。
+  - 想确认这个时间不是巧合，用**操作系统自己的进程启动时间**交叉验证（`boot` 的前半段就是 PID）：
+
+    ```powershell
+    Get-Process -Id 19556 | Select-Object Id, ProcessName, StartTime
+    ```
+
+    两者对得上，就是一次真实的冷启动（也是"用户刚重启过"的硬证据）。这条在你**不能依赖"当前会话还活着"**来推断客户端状态时特别有用：只要进程起来过、你能读到它当前的 PID 与启动时间，就能判断它有没有加载过你换上去的那一代代码。
 - `runningAgents`：市场上报的"正在运行的 agent"。市场正是用它在安装前拦截（有 agent 在跑就 409 拒绝安装），所以"用户在 GUI 里点安装失败"有时是它。
 - `error`：上一次操作的错误文本（含 pnpm 的原始诊断），排错第一手材料。
 
@@ -56,7 +64,10 @@ $u.packages | ForEach-Object { "{0,-26} {1,-44} -> {2}" -f $_.name, $_.installed
 ```
 
 - `source` 为 `npm` 时版本是 semver；为 `github` 时是**提交 sha**（对照 `installedVersion`/`latestVersion` 判断是否需要更新）。
-- **这个接口有缓存**：你从外面改了 profile 之后它可能仍报旧值。使缓存失效的幂等做法——重设一次同一区域：
+- **本地产物（`file:` 依赖）在这里没有版本信息**：市场把这类包归为 `linked`，`current` / `latest` 为空、`updateAvailable` 恒为 `false`。**它表示"这个接口不知道"，不是"已最新"**——这类包要回到它自己的发布通道核对（见 `update-channels.md`）。
+- **这个接口有缓存**：你从外面改了 profile 之后它可能仍报旧值。两个刷新办法，优先用第一个：
+  - `GET /dsh-market/updates?force=1` —— 直接返回逐包的完整表格（`kind` / `current` / `latest` / `updateAvailable`），`force` 顺手刷新缓存，一次调用就能看到改动后的真实状态；
+  - 重设一次同一区域（幂等）：
 
   ```powershell
   Invoke-WebRequest "$base/dsh-market/region" -Method POST -Headers $H -Body '{"region":"china"}' -UseBasicParsing
@@ -164,6 +175,7 @@ node $pnpm --dir $sc install --lockfile-only
 ## 8. 成功清单
 
 - [ ] 产物身份已核对：清单 `name` / `version` 与你要装的一致，分发通道是作者声明的那条，有校验和则已核对（见 `artifact-identity.md`）
+- [ ] 若是**换本地产物**：已下载并核作者校验和、profile 内副本哈希再核一次、lockfile 里**旧文件名 0 处引用而新文件名有条目**、旧产物仍保留可回滚（见 `update-channels.md`）
 - [ ] bundle 插件三处名字自洽：包名 / entry `name` / 客户端注册 id
 - [ ] `node_modules\<pkg>` 版本 = 目标版本（或 git 提交 = 目标 sha）
 - [ ] `dsh.profile.bundles` 含该包名（启用）

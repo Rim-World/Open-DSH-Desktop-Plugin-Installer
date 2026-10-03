@@ -40,7 +40,8 @@ Windows 安装目录通常在 `%LOCALAPPDATA%\Programs\DeepSeek Harness`；macOS
 |---|---|---|
 | `package.json` | 配置（客户端 + 你） | `dependencies` = 装了什么；`dsh.profile.bundles` = **启用**了哪些（顺序即层叠优先级）。pnpm 写前者，后者是"启用状态"的真相 |
 | `pnpm-workspace.yaml` | 客户端 + pnpm | `nodeLinker: hoisted`、`autoInstallPeers: false`（所以 peer 不由 pnpm 自动安装，必须由宿主提供）、`allowBuilds`（依赖构建脚本白名单）、`minimumReleaseAgeExclude`（新发布隔离豁免） |
-| `pnpm-lock.yaml` | pnpm | 精确解析结果；git 依赖在这里记录成 `https://codeload.github.com/<owner>/<repo>/tar.gz/<sha>` + integrity |
+| `pnpm-lock.yaml` | pnpm | 精确解析结果；git 依赖在这里记录成 `https://codeload.github.com/<owner>/<repo>/tar.gz/<sha>` + integrity；**本地产物记录成 `file:` 的路径**（路径变了 lockfile 就变了） |
+| `.dsh-tarballs\` | 你 | 本地产物（`file:` 依赖的目标）的稳定存放位置。**依赖表里存的是路径**，所以这个文件必须留着——删掉它，之后任何一次 `pnpm install` 都会因找不到文件失败 |
 | `.npmrc` | 你（可选） | 按 scope 指定 registry，例如 `@scope:registry=https://registry.npmjs.org/`；作用域规则优先于 `--registry` |
 | `cordis.patch.yml` | **用户** | 用户的配置层：插件的启停行、各插件配置、权限预设、模型等。客户端自己会写它（例如切换权限预设时）。除"用户明确要求改某个插件的配置"外不要动 |
 | `cordis.yml` | 客户端 | 空入口列表；客户端在重新组合时重写 |
@@ -82,3 +83,4 @@ profile 里的插件 `import '@deepseek-ai/dsh-tools'` 时，Node 会一路向�
 - 桌面端会监听 profile manifest 并**热挂载新启用的 bundle**；因此新装插件通常不需要重启。
 - 但**替换已装插件的文件（版本升级/git 新提交）不会替换内存里的模块代**：运行中的进程继续跑旧代码，新代码要重启宿主才加载。
 - 宿主重启会换 `boot` 标识（在市场 status 接口里可见），也是判断"我刚才的改动是否需要重启"的一个旁证。
+- **"装了但没启用"的状态串是聚合原因，不是用户意图**：包不在 `dsh.profile.bundles` 里时，宿主那条 `disabled` 的原因会写成"已停用(市场开关或补丁层),重启后保持关闭"——把几种可能性并成一句。此时市场自己的禁用清单（`state.json` 的 `disabled`）**可能是空的**，也就是没有任何"用户主动关掉"的记录。所以不要从这行字反推"用户关过它"，也不要顺手把它加回 `bundles`：把"装了 / 启用了 / 更新到哪个版本"三件事分开告诉用户，启用交给他决定。

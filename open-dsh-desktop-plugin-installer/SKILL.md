@@ -1,9 +1,9 @@
 ---
 name: open-dsh-desktop-plugin-installer
-description: 在 DSH Desktop（Electron 客户端）的 profile 上完成插件的安装、升级、启用、停用、卸载与回滚——动手前先核对「插件声明支持的版本与类型（宿主半边 / 浏览器半边 / 普通依赖）对比你实际在用的客户端（Desktop 还是 WebUI、什么版本）」，再核对**产物身份**（你拿到的来源装出来到底是哪个包：清单里的 `name` / `version`、作者声明的分发通道、默认分支与发布产物的差别、校验和，以及包名 / 装配条目名 / 客户端注册 id 三处是否自洽），把结论汇报给用户、由用户决定；再处置 pnpm 供应链策略、镜像滞后、git 构建白名单把安装挡住的情况，改坏清单或安装失败时按备份回滚。适用范围就是桌面端 profile；其中停用、卸载、从备份回滚只在一次本地临时 bundle 的完整演练里验证过，未做过的路径都会在报告里明说。宿主接口报的 `live` 只覆盖**宿主半边**：带浏览器半边的插件要冷启动客户端才算验证过，装完会把这一点讲清楚，而不是拿 `live` 当「能用」。桌面端 profile 由客户端独占：`dsh plugin --profile desktop` 被明确拒绝，dsh-market 对 git 源的插件一律拒绝，所以只能「按 profile 的真实语义写文件 + 跑它自己的 pnpm」。触发场景：用户说「装/更新/停用/卸载 DSH 插件」「这个插件能不能装」「它支持我这个版本吗」「它是桌面端还是网页端的」「插件装不上」「更新失败」「插件市场目录加载失败」，或 pnpm 报 ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION / NO_MATCHING_VERSION / ERR_PNPM_IGNORED_BUILDS / Lockfile failed supply-chain policy / EPERM rename，或要装指定版本、要给 GitHub 源的插件更新，或要求别重复安装；或说「这个仓库 / 这个包名装出来到底是什么」「它是不是最新正式版」「装完一重启客户端就起不来 / 白屏」。Check a plugin's declared version range and type against the running DSH Desktop client before installing, then install / update / enable / disable / remove it in a DSH Desktop profile and repair pnpm supply-chain, registry and build-approval failures.
-whenToUse: 目标是 DSH Desktop 的插件生命周期操作（含「这个插件能不能装到我这台机器上」这类先验问题），而官方 GUI / 市场 / CLI 走不通或需要版本级控制时。
+description: 在 DSH Desktop（Electron 客户端）的 profile 上完成插件的安装、升级、启用、停用、卸载与回滚——动手前先核对「插件声明支持的版本与类型（宿主半边 / 浏览器半边 / 普通依赖）对比你实际在用的客户端（Desktop 还是 WebUI、什么版本）」，再核对**产物身份**（你拿到的来源装出来到底是哪个包：清单里的 `name` / `version`、作者声明的分发通道、默认分支与发布产物的差别、校验和，以及包名 / 装配条目名 / 客户端注册 id 三处是否自洽），把结论汇报给用户、由用户决定；再处置 pnpm 供应链策略、镜像滞后、git 构建白名单把安装挡住的情况，改坏清单或安装失败时按备份回滚。适用范围就是桌面端 profile；其中停用、卸载、从备份回滚只在一次本地临时 bundle 的完整演练里验证过，未做过的路径都会在报告里明说。宿主接口报的 `live` 只覆盖**宿主半边**：带浏览器半边的插件要冷启动客户端才算验证过，装完会把这一点讲清楚，而不是拿 `live` 当「能用」。桌面端 profile 由客户端独占：`dsh plugin --profile desktop` 被明确拒绝，dsh-market 对 git 源的插件一律拒绝，所以只能「按 profile 的真实语义写文件 + 跑它自己的 pnpm」。触发场景：用户说「装/更新/停用/卸载 DSH 插件」「这个插件能不能装」「它支持我这个版本吗」「它是桌面端还是网页端的」「插件装不上」「更新失败」「插件市场目录加载失败」，或 pnpm 报 ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION / NO_MATCHING_VERSION / ERR_PNPM_IGNORED_BUILDS / Lockfile failed supply-chain policy / EPERM rename，或要装指定版本、要给 GitHub 源的插件更新，或要求别重复安装；或说「这个仓库 / 这个包名装出来到底是什么」「它是不是最新正式版」「有几个插件能更新」「帮我更新一下」「装完一重启客户端就起不来 / 白屏」。Check a plugin's declared version range and type against the running DSH Desktop client before installing, then install / update / enable / disable / remove it in a DSH Desktop profile and repair pnpm supply-chain, registry and build-approval failures; also determine which installed plugins actually have a newer upstream version by checking each package's own distribution channel, and swap a locally supplied artifact for its newer release.
+whenToUse: 目标是 DSH Desktop 的插件生命周期操作（含「这个插件能不能装到我这台机器上」「有哪些能更新」这类先验问题），而官方 GUI / 市场 / CLI 走不通、需要版本级控制、或市场的更新表对某个包根本没有版本信息时。
 metadata:
-  version: "0.3.0"
+  version: "0.4.0"
   upstream: https://github.com/Rim-World/Open-DSH-Desktop-Plugin-Installer
   updated: "2026-10-03"
   scope: "DSH Desktop (Electron) profile, Windows; 停用/卸载/回滚只在本地临时 bundle 上演练过——见「覆盖范围」"
@@ -13,7 +13,7 @@ metadata:
 
 DSH Desktop 的插件不是"复制一个目录"就完事的：一个插件要同时存在于三处——**依赖**（`package.json` 的 `dependencies`）、**启用**（`dsh.profile.bundles` 列表）、**落盘**（`node_modules`）。官方面板做这三步；当它做不到时，本技能按同样的语义手工完成，并且每一步都可验证、可回滚。
 
-先读 `references/profile-layout.md` 了解目录与文件职责（含「这个文件归客户端还是归你」的判据）；要判断「这个插件能不能装到我这个客户端」时读 `references/compatibility.md` 并跑 `scripts/plugin-compat.mjs`；**要装的东西是从 URL / 本地文件 / 别人给的地址来的**，先读 `references/artifact-identity.md` 钉住它到底是哪个包；涉及 pnpm 报错时读 `references/pnpm-supply-chain.md`；需要可观测证据时读 `references/verification.md`。`scripts/profile-report.mjs` 一条命令给出当前 profile 的完整快照（只读，先跑它）。
+先读 `references/profile-layout.md` 了解目录与文件职责（含「这个文件归客户端还是归你」的判据）；要判断「这个插件能不能装到我这个客户端」时读 `references/compatibility.md` 并跑 `scripts/plugin-compat.mjs`；**要装的东西是从 URL / 本地文件 / 别人给的地址来的**，先读 `references/artifact-identity.md` 钉住它到底是哪个包；**用户问「有几个能更新 / 帮我更新」或要换一个本地产物（`file:` 依赖、发布附件）时**，读 `references/update-channels.md`——"没有更新"这句话很可能只是一个接口对该包沉默，见阶段 2.6；涉及 pnpm 报错时读 `references/pnpm-supply-chain.md`；需要可观测证据时读 `references/verification.md`。`scripts/profile-report.mjs` 一条命令给出当前 profile 的完整快照（只读，先跑它）。
 
 ## 何时走哪条路（按优先级）
 
@@ -21,6 +21,8 @@ DSH Desktop 的插件不是"复制一个目录"就完事的：一个插件要同
 |---|---|
 | 「这个插件支持我的版本吗 / 它是给桌面端还是网页端的」 | 阶段 2：`scripts/plugin-compat.mjs` 出结论，**汇报给用户由用户决定**。已经装着且已启用时，转阶段 9 只报告、不重装 |
 | 「拿到一个仓库地址 / 本地 tarball / 别人口述的包名，不确定装出来是哪个包」 | 阶段 2.5：产物身份核对（`references/artifact-identity.md`）——**写盘前**做；名字对不上就先问用户 |
+| 「有几个插件能更新 / 帮我更新一下」 | 阶段 2.6 + `references/update-channels.md`：**不要**把市场的更新表当完整答案——它对本地产物（`linked`）没有版本信息，`updateAvailable:false` 在那里只表示"不知道"；逐个包按它自己的分发通道核对 |
+| 「装着的这个插件是本地 tarball / 发布附件，怎么换新版」 | `references/update-channels.md` 第 3 节：换文件 + 改依赖行的路径 + `install --offline`；全程不需要 registry |
 | 普通安装（npm 包、GUI 能用） | GUI：侧边栏/设置 →「插件」→ Add plugin（支持 npm 名、git 地址、tarball、本地绝对路径；内含 inspect、注册表选择、回滚、热挂载） |
 | 会话在 Creator 模式 | `plugin_manager` 工具（`install_bundle` / `remove_bundle` / `set_bundle_enabled`），要求 `danger-full-access` 或逐次批准 |
 | GUI 拒绝、需要精确版本、git 源更新、pnpm 报策略错 | **本技能**（直接操作 profile） |
@@ -33,14 +35,15 @@ DSH Desktop 的插件不是"复制一个目录"就完事的：一个插件要同
 
 这条规则比任何步骤都重要：**不要在没做过的路径上给用户保证**。
 
-已实测（Windows + DSH Desktop 运行时 `0.1.7-rc.2` + 自带 pnpm `11.7.0`）：
+已实测（Windows + DSH Desktop，运行时 `0.1.7-rc.2` 与 `0.2.0-rc.2` 两代都做过，自带 pnpm `11.7.0`）：
 
 | 路径 | 实测内容 |
 |---|---|
 | **兼容性核对（版本 + 类型）** | 对已装插件、本地目录、registry（`--spec`，约 1.2 s）三类目标判定 `engines.dsh` / `engines.node` / 类型（宿主半边 / 浏览器半边 / 普通依赖）/ peer 旁证；用一个合成的 `engines.dsh=">=0.2.0 <0.3.0"` 包验证了 ❌ 分支与退出码 `3`，`⚠️ 未知` 走退出码 `4` |
 | 安装 npm 包 | 装进 profile 并确认宿主 `live` |
 | 升级 npm 包 | 含镜像滞后时用 scope 级 `.npmrc` 绕过 |
-| 升级 git 源插件 | 含 `prepare` 构建与 `allowBuilds` 键 |
+| 升级 git 源插件 | 含 `prepare` 构建与 `allowBuilds` 键；也做过只换提交、版本号不变的窄更新（改的是 4 个文件、无构建步骤） |
+| **换 `file:` 本地产物（发布附件新版）** | 下载新版附件 → 与作者校验和比对 → 换 profile 内文件 → 改依赖行路径 → `pnpm install --offline` 落地（3.7 s，不触碰远端依赖）；旧产物保留可回滚。同一次还实测了：**市场接口对这类包给 `kind=linked`、版本字段为空、`updateAvailable:false`**——它不是"已最新" |
 | 启用 | 写进 `dsh.profile.bundles`，宿主热挂载，无需重启 |
 | **停用** | 移出 `dsh.profile.bundles`：宿主数秒内卸下该行，状态变 `disabled`、`bundle:false`、进入 `unbundled`；**依赖与 `node_modules` 文件保留**；无需重启 |
 | **卸载** | 按官方顺序（先停用 → 再 `pnpm remove`）：依赖、`installed`、`activation`、`node_modules`、`unbundled` 全部回到基线，其余插件仍 `live` |
@@ -48,7 +51,7 @@ DSH Desktop 的插件不是"复制一个目录"就完事的：一个插件要同
 | 策略与镜像 | 修复失效的 `minimumReleaseAgeExclude`、scope 级 `.npmrc`、`allowBuilds` 键 |
 | 验证 | 用宿主接口与日志判定结果，而不是看文件在不在 |
 
-**停用 / 卸载 / 回滚**的演练对象是一份**本地临时 bundle**（自己的空实现，`file:` 源）；安装、升级、启用则在真实第三方插件上做过。**未验证**：停用/卸载**第三方**（npm / git 源）插件时插件自身的副作用、**顺序颠倒**（仍启用着就 `pnpm remove`）、纯客户端插件（只有 `dsh.client`、无宿主半边）的完整生命周期、Creator 模式的 `plugin_manager` 工具路径、macOS/Linux 上的行为，以及类型结论之后的**功能冒烟**——"两端都在加载路径上"不等于"功能一定正常"。碰到这些场景，先把不确定性说清楚，再考虑走 GUI。
+**停用 / 卸载 / 回滚**的演练对象是一份**本地临时 bundle**（自己的空实现，`file:` 源）；安装、升级、换本地产物、启用则在真实第三方插件上做过。**未验证**：停用/卸载**第三方**（npm / git 源）插件时插件自身的副作用、**顺序颠倒**（仍启用着就 `pnpm remove`）、纯客户端插件（只有 `dsh.client`、无宿主半边）的完整生命周期、Creator 模式的 `plugin_manager` 工具路径、macOS/Linux 上的行为，以及类型结论之后的**功能冒烟**——"两端都在加载路径上"不等于"功能一定正常"。碰到这些场景，先把不确定性说清楚，再考虑走 GUI。
 
 **判据的边界（补上的一条）**：`state: live` 与 `diagnostics` 由宿主 Loader 给出，**只覆盖宿主半边**；带浏览器半边的插件要冷启动客户端才算验证过（机制与读日志的位置见 `references/verification.md` 第 6 节）。产物身份核对是**离线**的，不依赖网络；其中"三处名字自洽"是唯一能预判客户端启动失败的检查，但它只判注册键对不对，不判功能。
 
@@ -73,6 +76,8 @@ node scripts/profile-report.mjs            # 自动定位 DSH_HOME / profile / �
 - **pnpm 用 profile 自带的那个**：`<安装目录>\resources\runtime\pnpm\bin\pnpm.mjs`，用 PATH 上的 `node` 跑（`node <pnpm.mjs> …`）。不要用系统 npm/pnpm 去装 profile 依赖，也不要在 profile 目录外跑。
 - **`dsh plugin --profile desktop` 是被拒绝的**（启动器硬编码该 profile 归 Electron 客户端所有）。不要浪费时间去试它或用 `--dump-config`。
 - 看有没有别的插件操作正在跑：`<profile>\.plugin-manager\run.json` 存在就等它结束再动。
+- **先搜一遍这两个日志里有没有你这次要动的包**（`<profile>\.plugin-manager\logs\*\pnpm.log`、`<profile>\.dsh-market\log.ndjson`）——同一条命令之前失败过时，真正的报错文本就在那里，而用户转述的原因往往只是猜测。这一步很便宜，能省掉一次盲目重试。**不要只搜包名**：仓库名 / 附件文件名 / 提交 sha 都可能出现，而它们常与包名不同；包名 0 命中不等于没有记录，换关键词再搜一次。
+- 顺手记下**每个包属于哪条分发通道**（npm 版本 / `github:` 提交 / `file:` 本地产物）——阶段 2.6 的更新核对要按通道分别做。
 - 先把「用户装了哪些插件、各自版本/来源」记下来，便于事后比对（`profile-report.mjs` 会打印）。
 
 ## 阶段 2 — 兼容性核对：版本 + 类型 + 客户端，然后交给用户决定
@@ -110,6 +115,33 @@ node scripts/plugin-compat.mjs --spec '<pkg>@<version|tag>'   # ③ 最后才查
 4. **默认分支 ≠ 发布产物**：把 tag 解析成 commit，和默认分支 HEAD 比一比；不同就把差别讲给用户，并优先**钉提交 / 钉产物**，不要在 profile 里留一个浮动分支引用。
 
 **bundle 插件还要多做一步自洽检查**——它是唯一能预判"装上会不会在客户端启动时崩"的离线检查：包名、补丁文件里 entry 的 `name`、浏览器半边注册自己用的 id，**三处必须一致**。改名时漏掉第三处的包会表现成"宿主半边照样 `live`、诊断为空，一重启客户端起不来"。顺手确认用户那一层 `cordis.patch.yml` 里没有同名的 `insert`（两种接入方式只能选一种，都做会插两次）。
+
+**仓库名不是包名**：仓库可以改名、包可以改名、同名包可以属于另一个项目。"你给的标识 ≠ 清单里的 `name`"不是异常，而是常态——**以清单为准**，并把两边都讲给用户。作者在某次大版本里换掉**附件名前缀**也是允许的，所以按清单过滤，别按文件名过滤。
+
+## 阶段 2.6 — 更新核对：「有几个能更新」不能只看一个接口
+
+完整判据见 `references/update-channels.md`。核心只有一句：
+
+**更新有三个互不相通的通道（registry 版本 / git 提交 / 发布附件），而市场表格只覆盖前两个。** 本地 tarball 属于 `linked` 类——它的 `current` 与 `latest` 都是空的、`updateAvailable` 恒为 `false`。**这个 `false` 的意思是"我不知道"，不是"它是最新的"。** 把这一行读成"无需更新"，就会漏掉真正的更新。
+
+所以核对流程是：
+
+1. 先用市场的更新表拿全局视图（`/dsh-market/updates?force=1`，`force` 会顺手刷新缓存，比"重设区域"更直接）。引用它的 `checked`（扫了几个包）而不是只引用 `updatable`——`updatable: 0` 只有在 `checked` 等于你预期的包数时才说明"都看过了、没有更新"。
+2. 对每个 `linked` 类（以及任何版本字段为空的）包，**回到它自己的分发通道**去核对：读仓库的 Releases，先排除 `draft`，把 `prerelease` 交用户判断；取版本更高、且与本地同族的那个附件。
+3. 写报告时把「可检测」（旧 → 新，附提交号 / 版本号 / 附件名）与「可安装」（通道、要改哪一行、要不要构建）分开说，然后**停下让用户决定**。
+4. 动手前，**先用当前落盘产物的 sha256 与它所属版本发布的校验和比一次**：一致才说明你换的是官方产物；不一致就先停下问清楚来源。
+
+**更新 ≠ 启用。** 一个包可以装了但没启用（不在 `dsh.profile.bundles` 里）；宿主对它写的状态串（"已停用(市场开关或补丁层)"）是**聚合原因**，不代表用户主动关过它。更新只动依赖与文件，**不要顺手启用**；更新完把"它现在是启用还是停用"如实告诉用户，由他决定要不要开。
+
+**用户口述的状态与 manifest 冲突时，以 manifest 为准，但不静默改**：用户说"它没启用"而 `bundles` 里其实有它（或反过来）是常见情形——他的印象可能来自上一个版本的表现、来自界面没出现，或单纯记错。这时**只报告事实与可能的机制**，把开关留给用户：不要为了"符合他的描述"去停用，也不要"顺手改成一致"。
+
+### 命令与终端上的自伤陷阱（会伪装成"操作失败"）
+
+- **PowerShell 双引号里 `$var:` 会被当成作用域限定符**：`"branch $b: no"` 直接解析失败并让整条命令退出。写成 `${b}`。这看起来像操作失败，其实只是字符串写法。
+- **控制台编码 ≠ 文件编码**：中文显示成乱码是**显示层**的问题，不代表文件坏了。判好坏要看解析结果（`ConvertFrom-Json`）或哈希，不要因为终端乱码就重写文件。
+- **发布附件与源码 tarball 走不同下载主机**：`codeload.github.com` 常挂到超时，而 Release 附件往往通畅；同一条链路上一条通道失败**不能**推出"这个仓库拉不动"。下载大附件用重试循环 + 每次给足 `-TimeoutSec`，下完验长度与哈希。
+
+这个阶段的产物通常需要**换掉 profile 里的一个文件**，落地方式见 `references/update-channels.md` 第 3 节（改依赖行路径 + `pnpm install --offline`，不需要 registry）。
 
 ## 阶段 3 — 网络与镜像（先解决，别等中途失败）
 
@@ -157,6 +189,10 @@ node scripts/plugin-compat.mjs --spec '<pkg>@<version|tag>'   # ③ 最后才查
 
 - 装完立刻核对：`package.json` 的版本、`node_modules/<pkg>/package.json` 的版本、以及**其它插件的入口文件是否还在**（pnpm 会整体重解包依赖树，偶尔会让某个插件的构建产物"回到原始状态"）。
 - 版本选择优先级：用户点名的版本 > 官方 registry 的 `latest` > 镜像能给的成熟版本。镜像还没有最新版时，不要用"降级"糊弄过去——用阶段 3 的 scope `.npmrc` 解决。
+
+### 换掉一个 `file:` 本地产物（发布附件的新版）
+
+不涉及 registry，`pnpm add` 那套也用不上：改的是**文件与依赖行里的路径**。步骤、验证与报告模板见 `references/update-channels.md` 第 3 节，要点是：下载后先核作者校验和 → 复制进 profile 的稳定位置再核一次 → 结构化改依赖行 → `node pnpm.mjs install --offline` 落地（本地文件更新不需要网络，`--offline` 还避免顺带重解析远端依赖而超时）→ 旧产物**保留**以便回滚 → 数 lockfile 里新旧文件名的引用数（旧应为 0）。
 
 ## 阶段 6 — 安装 git 依赖（GitHub 源）
 
@@ -239,7 +275,11 @@ node $pnpm add --config.minimum-release-age=0 'github:<owner>/<repo>#<sha>'    #
 | `ERR_PNPM_IGNORED_BUILDS` / `set this to true or false` | git 依赖的构建脚本未被允许 | 在 `allowBuilds` 写精确 tarball 键（值 `true`）后重跑 |
 | `this desktop operation is not supported by the official plugin manager` | 桌面端 profile 不接受该操作（市场/CLI 路径） | 走 GUI 的「插件」页，或用本技能直接写 profile |
 | `profile "desktop" is managed exclusively by the Electron application` | CLI 被设计性拒绝 | 不要用 CLI 管理桌面端 profile |
-| 下载超时（`codeload` / `[23] operation was aborted due to timeout`） | GitHub 直连不稳 | 加长等待重试：`--fetch-timeout=600000 --fetch-retries=6` |
+| 下载超时（`codeload` / `[23] operation was aborted due to timeout`） | GitHub 直连不稳 | 先用 `--fetch-timeout=600000 --fetch-retries=6`；**发布附件与源码 tarball 走不同主机**，一条通道超时不等于这个仓库拉不动——换通道（Release 附件）往往能下载。先搜插件管理器日志，那里通常已有真正的报错文本 |
+| 市场更新表里某个包是 `kind=linked`、版本字段为空、`updateAvailable:false` | 这个接口**不覆盖本地产物**（`file:` tarball / 发布附件），"false"表示"不知道"而非"已最新" | 回到它自己的发布通道核对（Releases 的附件名 + 校验和）；报告里为这类包单独说明，别把它算进"已最新" |
+| 换了本地产物但版本没变 | `file:` 依赖记的是**路径**：只换了文件名没改依赖行，或改了依赖行没重新安装 | 结构化改依赖行 → `install --offline`；用 lockfile 里旧文件名 0 处、新文件名有条目来确认，而不是看目录里有没有新文件 |
+| 终端里中文显示成乱码 | 控制台编码 ≠ 文件编码（显示层问题） | 判文件好坏看 `ConvertFrom-Json` / 哈希，不要因为乱码重写文件 |
+| 命令报"变量引用无效"后整条退出 | PowerShell 双引号里的 `$var:` 被当成作用域限定符，与操作本身无关 | 把变量写成 `${var}`；不要把它当成"这次操作失败了" |
 | `EPERM … rename 'package.json.<随机数>' -> 'package.json'` | Windows 上 pnpm 的原子改名撞上文件占用 | 这条命令是**整体失败**的（依赖没写进去）：稍等再重试；若清单已被改坏，用备份恢复 |
 | 市场接口的 `installed` / `activation` / `bundles` 同时为空 | `package.json` 非法（多半是被手写坏的） | 立刻解析校验；从备份恢复三个文件，宿主会自行重读 |
 | `engines.dsh` 不包含当前客户端版本 | 作者声明的支持范围与你的客户端不符（加载器不会替你拦） | 先跑 `plugin-compat.mjs`，把冲突项讲清楚，让用户选：换版本 / 换插件 / 明知风险仍安装（备份 + 装后立刻验证） |
@@ -250,4 +290,4 @@ node $pnpm add --config.minimum-release-age=0 'github:<owner>/<repo>#<sha>'    #
 
 ## 一句话流程
 
-要权限 → 读 profile / 运行时 / 已装清单 → **核对产物身份（清单 `name`/`version`、分发通道、tag 与 HEAD、校验和、三处名字自洽）** → **核对兼容性（引擎范围、插件类型、客户端版本）并汇报给用户、由用户决定** → 解决 registry 与 GitHub 链路 → 备份 → 钉版本安装（绕过 + 豁免）→ 需要时补 `allowBuilds` → 写进 `dsh.profile.bundles` → 用宿主的接口验证 live → **带浏览器半边的说明"冷启动才算验证过"或完成冷启动** → 报告是否需要重启。
+要权限 → 读 profile / 运行时 / 已装清单（**含先搜一遍日志里有没有这次要动的包**）→ **核对产物身份（清单 `name`/`version`、分发通道、tag 与 HEAD、校验和、三处名字自洽）** → **核对兼容性（引擎范围、插件类型、客户端版本）并汇报给用户、由用户决定** → **若是"更新"：按每个包自己的通道核对可更新版本（市场的 `linked` 行不算答案），把结论交给用户** → 解决 registry 与 GitHub 链路 → 备份 → 按通道落地（npm 钉版本 + 绕过 + 豁免 / git 钉提交 + `allowBuilds` / `file:` 换文件 + 改依赖行 + `install --offline`）→ 写进 `dsh.profile.bundles`（**更新不自动等于启用，问过用户再动**）→ 用宿主的接口验证 live → **带浏览器半边的说明"冷启动才算验证过"或完成冷启动** → 报告是否需要重启、备份在哪、怎么回滚。

@@ -162,6 +162,8 @@ npm 会提示"命令行给出了 `--allow-scripts`，所以文件里的 `allow-s
   node $pnpm add --config.minimum-release-age=0 --fetch-timeout=600000 --fetch-retries=6 '<spec>'
   ```
 - 排查链路可用 `node -e "fetch(url,{method:'HEAD'})"` 或 `git ls-remote https://github.com/<owner>/<repo> HEAD`；`api.github.com` 通不代表 `codeload` 通，反之亦然。
+- **`codeload` 与发布附件是不同主机**：前者是 `github:` 与 `/tar.gz/<sha>` 的取件路径，后者（Release asset）走另一条链路。同一时刻经常是"源码 tarball 超时、Release 附件能下"（或相反）。一条通道失败**不能**推出"这个仓库拉不动"——先用另一条通道试一次，再谈结论。
+- **本地 `file:` 依赖的更新根本不需要网络**：`node $pnpm install --offline` 只从 store 与本地文件解析，不会去 HEAD/GET 依赖树里那些 `github:` / URL 依赖。要替换的本地产物顺手就落地了，也就不会被某个无关远端超时连累。真缺包时 pnpm 会明确报错，再摘掉 `--offline` 重跑即可。
 
 ## 5. pnpm 会改哪些文件
 
