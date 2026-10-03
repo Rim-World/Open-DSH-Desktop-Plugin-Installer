@@ -22,7 +22,7 @@
  * 结论只作汇报用——**不要替用户决定**，见 references/compatibility.md 的"决定门"。
  */
 
-import { existsSync, readFileSync, statSync, openSync, readSync, closeSync, readdirSync } from 'node:fs';
+import { existsSync, readFileSync, openSync, readSync, closeSync } from 'node:fs';
 import { join, dirname, isAbsolute, resolve as resolvePath } from 'node:path';
 import { homedir } from 'node:os';
 import { createRequire } from 'node:module';
@@ -73,13 +73,6 @@ const readJson = (path) => {
     return null;
   }
 };
-const listDirs = (dir) => {
-  try {
-    return readdirSync(dir, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name);
-  } catch {
-    return [];
-  }
-};
 
 /** Read one file out of an Electron asar archive (header parse, no extraction). */
 function readFromAsar(asarPath, wanted) {
@@ -98,6 +91,8 @@ function readFromAsar(asarPath, wanted) {
       node = node?.files?.[part];
       if (!node) return null;
     }
+    // Entry offsets have been observed one byte off; read a little extra and
+    // start at the first '{' so the parse is robust either way.
     const buf = Buffer.alloc(node.size + 8);
     readSync(fd, buf, 0, buf.length, base + Number(node.offset) - 2);
     const text = buf.toString('utf8');

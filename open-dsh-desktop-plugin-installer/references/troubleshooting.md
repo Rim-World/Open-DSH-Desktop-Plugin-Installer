@@ -1,0 +1,24 @@
+# 常见报错 → 处置对照表
+
+SKILL.md 阶段流程中撞到的报错在这里对照。两条通用原则（SKILL.md「常见报错」一节）同样适用：先搜 `.plugin-manager\logs\*\pnpm.log` 与 `.dsh-market\log.ndjson`，再确认 pnpm 到底改没改盘。深挖细节的文档在各行右列标注。
+
+| 报错 | 含义 | 处置 |
+|---|---|---|
+| `ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION`（`Lockfile failed supply-chain policy check`） | lockfile 里有年轻条目且未被豁免。pnpm **先写 lockfile、再校验**，所以哪怕只有一次更新失败，那条年轻条目也已经留在 lockfile 里——它会拦住一切操作（含无关插件、GUI、市场） | 本次命令加 `--config.minimum-release-age=0`；把该版本并进 `minimumReleaseAgeExclude`（**同一包名只留一条**，多个版本用 `||`）。不要去"修"被连累的其它插件。详见 `pnpm-supply-chain.md` 第 1 节 |
+| `ERR_PNPM_NO_MATCHING_VERSION` | 当前 registry 没有这个版本（镜像滞后 / 装错源） | 查多个 registry；给该 scope 配 `.npmrc` 指向官方源。详见 `pnpm-supply-chain.md` 第 2 节 |
+| `ERR_PNPM_IGNORED_BUILDS` / `set this to true or false` | git 依赖的构建脚本未被允许 | 在 `allowBuilds` 写精确 tarball 键（值 `true`）后重跑。详见 `pnpm-supply-chain.md` 第 3 节 |
+| `this desktop operation is not supported by the official plugin manager` | 桌面端 profile 不接受该操作（市场/CLI 路径） | 走 GUI 的「插件」页，或用本技能直接写 profile |
+| `profile "desktop" is managed exclusively by the Electron application` | CLI 被设计性拒绝 | 不要用 CLI 管理桌面端 profile |
+| 下载超时（`codeload` / `[23] operation was aborted due to timeout`） | GitHub 直连不稳 | 先用 `--fetch-timeout=600000 --fetch-retries=6`；**发布附件与源码 tarball 走不同主机**，一条通道超时不等于这个仓库拉不动——换通道（Release 附件）往往能下载。先搜插件管理器日志，那里通常已有真正的报错文本。详见 `pnpm-supply-chain.md` 第 4 节 |
+| 市场更新表里某个包是 `kind=linked`、版本字段为空、`updateAvailable:false` | 这个接口**不覆盖本地产物**（`file:` tarball / 发布附件），"false"表示"不知道"而非"已最新" | 回到它自己的发布通道核对（Releases 的附件名 + 校验和）；报告里为这类包单独说明，别把它算进"已最新"。详见 `update-channels.md` 第 1 节 |
+| 换了本地产物但版本没变 | `file:` 依赖记的是**路径**：只换了文件名没改依赖行，或改了依赖行没重新安装 | 结构化改依赖行 → `install --offline`；用 lockfile 里旧文件名 0 处、新文件名有条目来确认，而不是看目录里有没有新文件。详见 `update-channels.md` 第 3 节 |
+| 终端里中文显示成乱码 | 控制台编码 ≠ 文件编码（显示层问题） | 判文件好坏看 `ConvertFrom-Json` / 哈希，不要因为乱码重写文件 |
+| 命令报"变量引用无效"后整条退出 | PowerShell 双引号里的 `$var:` 被当成作用域限定符，与操作本身无关 | 把变量写成 `${var}`；不要把它当成"这次操作失败了" |
+| `EPERM … rename 'package.json.<随机数>' -> 'package.json'` | Windows 上 pnpm 的原子改名撞上文件占用 | 这条命令是**整体失败**的（依赖没写进去）：稍等再重试；若清单已被改坏，用备份恢复 |
+| 市场接口的 `installed` / `activation` / `bundles` 同时为空 | `package.json` 非法（多半是被手写坏的） | 立刻解析校验；从备份恢复三个文件，宿主会自行重读 |
+| `engines.dsh` 不包含当前客户端版本 | 作者声明的支持范围与你的客户端不符（加载器不会替你拦） | 先跑 `plugin-compat.mjs`，把冲突项讲清楚，让用户选：换版本 / 换插件 / 明知风险仍安装（备份 + 装后立刻验证） |
+| 插件装上、也 live，但**完全没反应** | 这个包没有 `dsh.bundle.patch`（不是 bundle 插件，只是普通依赖），或它的浏览器半边没有 patch 行把它挂成 Loader row | 官方文档：这类包可以安装，但不激活任何层。别当"装好了"，回去看作者的安装说明 |
+| 插件装了但界面没变化 | 运行中进程仍持旧模块 | 重启 DSH；替换文件不会热换模块代 |
+| 冷启动后客户端起不来 / 白屏，宿主只说某条 entry `did not activate` / `import failed` | 失败在**浏览器半边**；宿主那句是症状，原因在客户端启动日志的 renderer console 里 | 读客户端用户数据目录下的启动/崩溃日志（`verification.md` 第 6 节）；先把该包名移出 `dsh.profile.bundles` 恢复可用，再按 `artifact-identity.md` 第 5 节查五处名字是否自洽 |
+| 客户端报某注册键**重复注册**，或启动报重复 entry id | 同一个东西被登记了两次：两种接入方式都用了（`bundles` 里一条 + 手写一条 `insert`），或包改名后内部 id 与包名不一致 | 先确认接入方式只有一种；再核对 `artifact-identity.md` 第 5 节的五处名字（包名 / entry `name` / 客户端注册 id / 浏览器半边导出名 / 宿主半边生产者标识）是否一致 |
+| 其它插件的入口文件在安装后消失 | pnpm 整体重解包依赖树，把无关插件的构建产物退回"未构建"状态 | 对该包按依赖行里已有的 specifier 重跑一次 `pnpm add --config.minimum-release-age=0`，让 `prepare` 重新执行；仍失败就回滚本次操作。详见 `pnpm-supply-chain.md` 第 5 节 |
