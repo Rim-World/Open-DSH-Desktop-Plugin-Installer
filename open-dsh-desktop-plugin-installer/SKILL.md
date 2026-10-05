@@ -1,11 +1,11 @@
 ---
 name: open-dsh-desktop-plugin-installer
-description: 在 DSH Desktop（Electron 客户端）的 profile 上安装、升级、启用、停用、卸载插件，装坏时按备份回滚。动手前先做三项只读核对——插件声明的支持范围与类型、来源产物到底是哪个包、哪些包按各自的分发通道有更新——结论交用户决定；再处置 pnpm 供应链策略、镜像滞后、git 构建白名单挡路的问题。只适用于桌面端 profile；`state: live` 只覆盖宿主半边，带浏览器半边的插件要冷启动客户端才算验证过。触发场景：用户说「装/更新/停用/卸载 DSH 插件」「这个插件能不能装」「它支持我这个版本吗」「有几个插件能更新」「帮我更新一下」「插件装不上」「更新失败」「插件市场目录加载失败」「装完一重启客户端就起不来/白屏」，或要装指定版本、要给 GitHub 源的插件更新，或 pnpm 报 ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION / NO_MATCHING_VERSION / ERR_PNPM_IGNORED_BUILDS / Lockfile failed supply-chain policy / EPERM rename，或要求别重复安装。
+description: "在 DSH Desktop（Electron 客户端）的 profile 上安装、升级、启用、停用、卸载插件，装坏时按备份回滚。动手前先做三项只读核对——插件声明的支持范围与类型、来源产物到底是哪个包、哪些包按各自的分发通道有更新——结论交用户决定；再处置 pnpm 供应链策略、镜像滞后、git 构建白名单挡路的问题。只适用于桌面端 profile；`state: live` 只覆盖宿主半边，带浏览器半边的插件要冷启动客户端才算验证过。触发场景：用户说「装/更新/停用/卸载 DSH 插件」「这个插件能不能装」「它支持我这个版本吗」「有几个插件能更新」「帮我更新一下」「插件装不上」「更新失败」「插件市场目录加载失败」「装完一重启客户端就起不来/白屏」，或要装指定版本、要给 GitHub 源的插件更新，或 pnpm 报 ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION / NO_MATCHING_VERSION / ERR_PNPM_IGNORED_BUILDS / Lockfile failed supply-chain policy / EPERM rename，或要求别重复安装。"
 whenToUse: 目标是 DSH Desktop 的插件生命周期操作（含「这个插件能不能装到我这台机器上」「有哪些能更新」这类先验问题），而官方 GUI / 市场 / CLI 走不通、需要版本级控制、或市场的更新表对某个包根本没有版本信息时。
 metadata:
   version: "0.5.0"
   upstream: https://github.com/Rim-World/Open-DSH-Desktop-Plugin-Installer
-  updated: "2026-10-04"
+  updated: "2026-10-06"
   scope: "DSH Desktop (Electron) profile, Windows; 停用/卸载/回滚只在本地临时 bundle 上演练过——见「覆盖范围」"
 ---
 
