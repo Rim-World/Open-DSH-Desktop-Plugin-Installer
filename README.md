@@ -28,7 +28,7 @@ DSH Desktop 的 profile 由 Electron 客户端独占，三条常规通道各有�
 
 ### 已实测
 
-测试区间 2026-09-27 至 2026-10-03，Windows 加 DSH Desktop，运行时 0.1.7-rc.2 和 0.2.0-rc.2 两代都跑过，用客户端自带的 pnpm 11.7.0。
+测试区间 2026-09-27 至 2026-10-11，Windows 加 DSH Desktop，运行时 0.1.7-rc.2 和 0.2.0-rc.2 两代都跑过，用客户端自带的 pnpm 11.7.0。
 
 | 路径 | 实测内容 |
 |---|---|
@@ -43,6 +43,8 @@ DSH Desktop 的 profile 由 Electron 客户端独占，三条常规通道各有�
 | 从备份回滚 | 一次真实损坏（清单被写坏、宿主插件列表全空）后恢复三个文件，宿主自动回到全 live、无诊断、和基线逐字节一致 |
 | pnpm 策略修复 | 修好「同一包名多条豁免规则只有第一条生效」造成的全局阻塞；之后用户自己在市场里的更新也恢复正常 |
 | 可观测验证 | 用 `/dsh-market/installed`（Loader 实况）、`updates/summary`、市场日志和插件管理器日志判定结果 |
+| 更新后的宿主半边实况核对 | 用插件**自己的**宿主路由判定"挂没挂上"，而不是只看市场那条 `state`；核实过「条目激活期校验不通过 → `fiberPhase=FAILED` → 它自己的路由整条 404 → 按需资产块整批取不到」这条链路，并实测了修法与复验 |
+| 四处落账一致性的判据 | 依赖行、`pnpm-lock.yaml`、`node_modules\<pkg>\package.json`、`node_modules\.modules.yaml` 四处本应一致；漂移时 `pnpm install` 会按依赖行把已落盘的版本静默改回去，所以判据是"先只读报出现状、由用户决定以哪一份为准" |
 | 写前备份 | 每次改动前把 `package.json`、`pnpm-lock.yaml`、`pnpm-workspace.yaml` 复制到带时间戳的目录 |
 
 安装、升级、启用是在真实第三方插件上做的；停用、卸载、回滚的演练对象是一份本地临时 bundle（自建的空实现，`file:` 源）。第三方插件停用或卸载时自身会有什么副作用，没有验证过，技能不对此负责。
@@ -67,6 +69,8 @@ DSH Desktop 的 profile 由 Electron 客户端独占，三条常规通道各有�
 - 「有几个插件能更新」「帮我看看哪些能更新，然后更新掉」（尤其是市场显示「无可用更新」、用户却确认上游发了新版时）
 - 插件市场报「插件目录加载失败」或 `The operation was aborted due to timeout`
 - pnpm 报 `ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION`、`Lockfile failed supply-chain policy check`、`ERR_PNPM_NO_MATCHING_VERSION`、`ERR_PNPM_IGNORED_BUILDS`
+- 更新完某个插件后，它的界面功能或设置栏消失，插件页显示「异常」
+- 「市场接口说这个插件 live，但它没反应」——要判定某个插件的宿主半边到底挂没挂上
 - 需要安装指定版本，或把 GitHub 源插件更新到最新提交
 - 要求「别重复安装」「先看看装了什么」
 
@@ -88,6 +92,10 @@ DSH Desktop 的 profile 由 Electron 客户端独占，三条常规通道各有�
 - **更新发现按通道做**：更新有三条通道（registry 版本、git 提交、发布附件），市场更新表只覆盖前两条。本地 tarball 属于 `linked` 类，`updateAvailable:false` 的意思是「不知道」，不是「已最新」。
 - **换本地产物有独立流程**：`file:` 依赖存的是路径，更新就是换文件加改依赖行，`pnpm add` 用不上。先用当前产物的 sha256 对比作者校验和，证明手上这份是谁的，再换。
 - **验证分两层**：`live` 加零诊断只证明宿主半边；带浏览器半边的插件要冷启动。客户端起不来时读它自己的启动日志，不是 profile 的包操作日志。
+- **市场说 `live` 不等于宿主半边活着**：市场那条 `state` 是市场自己的记账，插件页的「异常」才是宿主 Loader 报的 `fiberPhase=FAILED`。技能要求取一条**插件自己的**可观测面（宿主路由、工具表）当实况证据。
+- **更新后"界面功能消失"先探宿主路由**：插件可以把部分界面功能放在自己的资产路由下按需取；宿主半边没挂上时这些块整批 404，界面看起来像"功能被删了"。判据是"已注册的 exact 路由回它自己的响应"——未知路径 GET 回 404 空体、非 GET/HEAD 回 405 空体，405 不代表路由在。
+- **激活期校验会让条目静默失败**：插件导出 `Config`（schemastery）时，Cordis 会在 apply 之前用它校验该行的配置；插件新版本收紧了 schema、而 profile 里存着旧版本写下的值，就会在激活期直接失败，插件自己的代码一行都不跑。技能给了只读排查（用插件包自己导出的 `Config` 校验现存值）与修法（改用户配置层里那一项，宿主会重新激活该条目）。
+- **四个落账点**：依赖行、`pnpm-lock.yaml`、`node_modules\<pkg>\package.json`、`node_modules\.modules.yaml`。发现漂移时不要用 `pnpm install` 去对齐——pnpm 按依赖行重解，会把已落盘的版本静默改回去。
 - **分清「客户端自带的」和「用户装的」**：改动前先确定文件归谁。客户端载荷里被版本清单钉住的那份，不要替换。
 - **幂等**：已经装了、已启用、版本满足要求，就只报告，不重装。
 - **更新和启用分开**：更新不动 `dsh.profile.bundles`。宿主对没启用的包写的状态串是聚合原因，不代表用户主动关过它。要不要启用，交给用户决定。
@@ -145,7 +153,7 @@ node open-dsh-desktop-plugin-installer/scripts/plugin-compat.mjs --dir ./some-pl
 ## 设计原则（这些是做法，不是保证）
 
 - **只读优先。** 先侦察，再要权限，再备份，最后才写文件。
-- **不碰用户的配置层。** `cordis.patch.yml` 是用户自己的插件开关和配置，客户端会自己维护它；除非用户明确要求，技能不改。
+- **不碰用户的配置层。** `cordis.patch.yml` 是用户自己的插件开关和配置，客户端会自己维护它；除非用户明确要求改某个插件的配置，技能不改。真要改时也只改已经定位到的那一项配置值，并且改完立刻复验（宿主会重新激活该条目）。
 - **幂等。** 已经满足要求就只报告，不重装。
 - **写前备份，坏了能回。** 改前把 `package.json`、`pnpm-lock.yaml`、`pnpm-workspace.yaml`（必要时含 `.npmrc`）备份到工作区的带时间戳目录。回滚实测过：一次真实损坏靠恢复这三个文件回到基线。
 - **manifest 只做结构化编辑。** 演练中唯一一次真正的破坏就是手拼 JSON 拼错了。技能要求改完立刻解析校验（`ConvertFrom-Json` 或 `JSON.parse`）。
@@ -166,8 +174,8 @@ node open-dsh-desktop-plugin-installer/scripts/plugin-compat.mjs --dir ./some-pl
     │   ├── artifact-identity.md          # 产物身份：清单字段、分发通道、tag 与默认分支、校验和、五处名字自洽
     │   ├── update-channels.md            # 更新发现（三条通道）、本地产物替换、取件与命令陷阱
     │   ├── pnpm-supply-chain.md          # 24 小时隔离、豁免规则、registry scope、构建白名单、超时重试、离线安装
-    │   ├── verification.md               # 可观测判据：本地接口、日志、探针、冷启动验证、成功清单
-    │   └── troubleshooting.md            # 常见报错对照表
+    │   ├── verification.md               # 可观测判据：本地接口、日志、探针（含宿主路由探针与激活期校验）、冷启动验证、成功清单
+    │   └── troubleshooting.md            # 常见报错对照表（含"更新后功能消失 / 插件页异常"的分诊）
     └── scripts/
         ├── profile-report.mjs            # 只读快照：profile、运行时、已装清单、可疑策略规则（无依赖）
         └── plugin-compat.mjs             # 只读兼容性核对：声明范围、插件类型、客户端版本，给结论和退出码
@@ -176,6 +184,15 @@ node open-dsh-desktop-plugin-installer/scripts/plugin-compat.mjs --dir ./some-pl
 ## 版本与生成说明
 
 版本号见 `SKILL.md` frontmatter 的 `metadata.version`，`metadata.updated` 随每次改动更新。本机 DSH 安装的那份与仓库 `main` 保持同步。技能正文和参考文档不写具体排查日期，只保留可复用的判据。
+
+### 0.6.0（更新后的宿主半边核对、激活期校验、四个落账点）
+
+- 修正一处判据：市场接口的 `state: live` 是市场自己的记账，**不等于**宿主 Loader 里那条 fiber 真的 ACTIVE（实测过「市场说 `live`、插件页显示「异常」」的组合）。SKILL.md 的「判据的边界」与 `verification.md` 第 1 节同步改写。
+- `verification.md` 第 5 节新增两个小节：**路由探针**（用插件自己的宿主路由判定宿主半边挂没挂上；未知路径 GET 回 404 空体、非 GET/HEAD 回 405 空体，405 不代表路由存在）与**激活期卡住**（插件导出 `Config` 时 Cordis 在 apply 之前校验该行配置，插件新版本收紧 schema 会让旧值当场失败、条目直接 failed 且插件自己的代码一行都不跑；附只读排查与改配置值的修法）。
+- SKILL.md 阶段 8 新增第 8 条「宿主半边到底挂上了吗」；阶段 1 新增"四点一致性"核对；`description` 增加触发信号「更新后界面功能或设置栏消失 / 插件页显示「异常」」；一句话流程补上这两处复验动作。
+- `profile-layout.md` 新增「四个落账点」一节：依赖行、`pnpm-lock.yaml`、`node_modules\<pkg>\package.json`、`node_modules\.modules.yaml` 四处漂移时，`pnpm install` 会按依赖行把已落盘的版本静默改回去，正确做法是先只读报现状、由用户决定以哪一份为准。同时修正 `cordis.yml` 那一行（它是组合后的完整入口列表，不是空列表），并写明修配置值要改哪两处。
+- `troubleshooting.md` 新增四行：市场说 `live` 与插件页「异常」并存、更新后界面功能或设置栏消失、激活期 `invalid config`、四处落账不一致却想 `pnpm install` 对齐。
+- `EVALUATION.md` 新增两个提示词：更新后界面消失 / 插件页异常的分诊、四处落账一致性的判定。
 
 ### 0.5.0（判据统一、结构整理、脱敏）
 
@@ -215,7 +232,7 @@ node open-dsh-desktop-plugin-installer/scripts/plugin-compat.mjs --dir ./some-pl
 
 ### 生成说明
 
-0.4.0 及之前的技能内容由 DeepSeek-V4.1-Flash 生成，来自真实 DSH 桌面端插件安装和更新过程的积累，「覆盖范围」按实际操作记录。0.5.0 的判据统一、结构整理和脱敏在 ZCode 会话中完成，改动以 git 历史为准。
+0.4.0 及之前的技能内容由 DeepSeek-V4.1-Flash 生成，来自真实 DSH 桌面端插件安装和更新过程的积累，「覆盖范围」按实际操作记录。0.5.0 的判据统一、结构整理和脱敏在 ZCode 会话中完成，改动以 git 历史为准。0.6.0 补充的是更新后宿主半边的核对判据、激活期校验的处置与四个落账点的一致性规则。
 
 ## 许可
 

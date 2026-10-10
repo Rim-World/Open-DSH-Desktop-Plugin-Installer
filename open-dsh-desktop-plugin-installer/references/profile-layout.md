@@ -43,8 +43,8 @@ Windows 安装目录通常在 `%LOCALAPPDATA%\Programs\DeepSeek Harness`；macOS
 | `pnpm-lock.yaml` | pnpm | 精确解析结果；git 依赖在这里记录成 `https://codeload.github.com/<owner>/<repo>/tar.gz/<sha>` + integrity；**本地产物记录成 `file:` 的路径**（路径变了 lockfile 就变了） |
 | `.dsh-tarballs\` | 你 | 本地产物（`file:` 依赖的目标）的稳定存放位置。**依赖表里存的是路径**，所以这个文件必须留着——删掉它，之后任何一次 `pnpm install` 都会因找不到文件失败 |
 | `.npmrc` | 你（可选） | 按 scope 指定 registry，例如 `@scope:registry=https://registry.npmjs.org/`；作用域规则优先于 `--registry` |
-| `cordis.patch.yml` | **用户** | 用户的配置层：插件的启停行、各插件配置、权限预设、模型等。客户端自己会写它（例如切换权限预设时）。除"用户明确要求改某个插件的配置"外不要动 |
-| `cordis.yml` | 客户端 | 空入口列表；客户端在重新组合时重写 |
+| `cordis.patch.yml` | **用户** | 用户的配置层：插件的启停行、各插件配置、权限预设、模型等。客户端自己会写它（例如切换权限预设时）。除"用户明确要求改某个插件的配置"外不要动；用户要求修某个插件的配置值时，改的就是这里对应的那一行 |
+| `cordis.yml` | 客户端 | **组合后的**完整入口列表（客户端在重新组合时重写，不是空列表）：每个条目连同它的 `config` 值都在这里。要修某个条目的配置值时，这一份里的同一行也要改——实测改对之后宿主会重新激活该条目，无需重启客户端 |
 | `.plugin-manager\` | 客户端内置插件管理器 | `run.json` = 正在进行的包操作（存在就别动手）；`logs\<op>\pnpm.log` = 每次操作的 pnpm 原始输出 |
 | `.dsh-market\` | dsh-market 插件 | `state.json`（区域、收藏、禁用）、`log.ndjson`（市场自己的事件流）、`discovery-compatibility-v1.json` |
 | `node_modules\` | pnpm | 真正落盘的插件 |
@@ -58,6 +58,28 @@ Windows 安装目录通常在 `%LOCALAPPDATA%\Programs\DeepSeek Harness`；macOS
 3. `node_modules/<pkg>` 里有它的**入口产物**（`dsh.bundle.patch` 指向的 patch 文件、`main`/`exports` 指向的 JS）。
 
 判定"它是不是 bundle 插件"的契约是 **`package.json` 的 `dsh.bundle.patch`**；`dsh.plugin.json` 只是作者自用元数据，loader 不读它。带 `dsh.client` 的插件还有浏览器半边（由客户端的 client-modules 在页面里挂载）。
+
+## 四个落账点："装了什么"有四份记录
+
+同一个包"装了什么版本"记在四个地方，正常时互相一致：
+
+| 落账点 | 记什么 | 谁写 |
+|---|---|---|
+| `package.json` 的 `dependencies` | 声明的 specifier（`^1.2.3` / `github:…#<sha>` / `file:…`） | pnpm、GUI、你 |
+| `pnpm-lock.yaml` | 解析结果：精确版本 / 提交 sha / 文件路径 + integrity | pnpm |
+| `node_modules\<pkg>\package.json` | 真正落盘的那一份 | pnpm |
+| `node_modules\.modules.yaml` | pnpm 自己的安装状态与依赖图 | pnpm |
+
+**四处漂移时不要急着"对齐"。** 出现"依赖行还写着旧版本，`node_modules` 里已经是新版本"这类组合时，最顺手的动作 `pnpm install` 恰恰是错的：pnpm 按**依赖行**重解，会把已经落盘的新版本静默改回去。正确处理是先只读地报出现状，问清这份漂移是谁造成的、是不是预期（有些本地产物的发版流程只更新文件、不改依赖行），再决定以哪一份为准——要用新版本，就把依赖行也改到新版本；要回退，才用 `install`。
+
+只读核对这四处（在 profile 目录里跑）：
+
+```powershell
+(Get-Content package.json -Raw | ConvertFrom-Json).dependencies.'<pkg>'
+Get-Content node_modules\<pkg>\package.json -Raw | ConvertFrom-Json | Select-Object name, version
+Select-String -Path pnpm-lock.yaml -Pattern '<pkg>' | Select-Object -First 5
+Select-String -Path node_modules\.modules.yaml -Pattern '<pkg>' | Select-Object -First 5
+```
 
 ## 模块解析（为什么 peer 不用装）
 

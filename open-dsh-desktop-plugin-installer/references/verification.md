@@ -36,7 +36,7 @@ $j.activation.PSObject.Properties | ForEach-Object { "{0,-32} {1,-8} bundle={2} 
 
 判断"清单是不是坏了"要看 **`activation` + `bundles` + `present` 同时为空**（只有这组能观测到 manifest 非法）；单看 `installed` 为空没有意义。
 
-**注意**：`live` 只说明"这一行挂着"。**替换了插件文件（升级）后它依然显示 live**，因为进程持有的是旧模块代——那种情况必须重启，别用 `live` 反推"新版本已生效"。
+**注意**：`live` 只说明"这一行在 bundle 层、市场认为它挂着"。它有两件事替代不了：①**替换了插件文件（升级）后它依然显示 live**，因为进程持有的是旧模块代——那种情况必须重启，别用 `live` 反推"新版本已生效"；②**它不等于宿主 Loader 里那条 fiber 真的 ACTIVE**——实测过「市场说 `live`、插件页显示「异常」（`fiberPhase=FAILED`）」的组合。要判定"宿主半边挂上了"，用第 5 节的路由探针。
 
 ## 2. 宿主状态 —— `/dsh-market/status`
 
@@ -127,6 +127,41 @@ node "<profile>\node_modules\<pkg>\.probe.mjs"; Remove-Item "<profile>\node_modu
 
 工具在、技能在 → 说明宿主半边真的挂上了；这比 `state: live` 有力得多，而且是只读操作。两个前提：① `dsh.plugin.json` 是**作者的元数据，官方 loader 并不读它**（契约是 `package.json` 的 `dsh.bundle.patch`），所以它只是线索；② 只对"提供工具/技能"的插件有效，纯界面插件没有这条通路（那类只能人工看界面）。
 
+### 路由探针：宿主半边到底挂上了没有
+
+`activation.<pkg>.state` 与 `diagnostics` 都是**清单 / 记账层**的判断，不足以证明那个条目真的跑起来了。要硬证据就取一条**插件自己的**可观测面——最通用的是它的宿主路由。
+
+1. 先找它注册了什么：在插件包里搜 `register(` 与 `path:`，宿主入口通常在 `lib/host/*.js`。取它的前缀路由和任意一个 exact 路径（形如 `/<插件前缀>/<端点>`）。
+2. 再请一次：
+
+   ```powershell
+   Invoke-WebRequest "$base/<插件前缀>/<端点>" -SkipHttpErrorCheck -UseBasicParsing | Select-Object StatusCode, RawContentLength
+   ```
+
+3. **别用 404 / 405 下结论**：未知路径 GET 回 `404` 空体；非 GET/HEAD 的未知路径回 `405` 空体（核心 webServer 的兜底），所以 405 不代表"路由存在"。判据是"**已注册的 exact 路由回它自己的响应**"——JSON、`401 {"ok":false,…}`、插件自己写的 `405 method not allowed` 都算路由在；**整条前缀都回 404 空体**才算"它的路由一条都没注册"。
+4. 同时取一条**已知可用**的其它插件路由当对照组，排除"整个本地服务出问题了"。
+
+路由整条缺失 = 宿主半边没挂上。三个候选，按顺序排查：① 条目在 Loader 里被判为失败（激活期校验，见下一小节）；② 注册路由所在的 `scope.effect` 里前面的初始化抛错，注册被它自己的 `try/catch` 吞掉（只剩一条 `logger.warn`）；③ 这个条目根本没进组合（没启用 / 在 patch 层被关掉）。
+
+**为什么症状看起来像"功能没了"**：插件可以把部分界面功能放在自己的资产路由下，页面接管后按清单按需取。宿主半边没挂上时这些按需块整批 404，浏览器侧那些功能各自报一次并退役——用户看到的是"某个设置栏 / 面板消失 + 插件页一个「异常」"，不是崩溃。所以"更新后界面元素消失"的第一现场是**宿主路由**，不是安装完整性：先探路由，别先怀疑文件没复制全。
+
+### 激活期卡住：插件自己的配置校验
+
+插件如果在入口导出 `Config`（schemastery schema），Cordis 会在 **apply 之前**用它校验该行的 `config`；不通过就抛 `ValidationError: invalid config: …`，条目直接 failed——插件自己的 init 代码**一行都不会跑**，界面上也看不见那句话。
+
+升级后踩中它的条件很具体：**插件的新版本收紧了它自己的 schema，而 profile 里存着旧版本写下的值**（例如某项从字符串档位改成布尔开关）。这个值在升级前是合法的，所以用户侧毫无预兆。
+
+排查（只读，用插件包自己导出的 schema 校验 profile 里现存的值）：
+
+```js
+// 以 profile 目录为工作目录
+const { Config } = await import('<profile>/node_modules/<pkg>/lib/host/settings.js') // 或入口导出的 Config
+console.log(Config['~standard'].validate(<该条目现存的 config 对象>))
+// 有 issues 就是它：把 issues 里的路径与期望类型对到那一项上
+```
+
+修法：把 profile 里该条目的**那一个值**改成新 schema 接受、且语义等价的值（先把"旧值 → 新值"的对应关系讲给用户）。改的是用户配置层那一行，以及组合结果里的同一行（见 `profile-layout.md` 的 profile 文件表）；**只有用户明确要求修这个插件的配置时才动它**。改对之后宿主会重新激活该条目（实测无需重启客户端），改完回到上面的路由探针复验，并让用户重新加载页面——已经退役的按需块要重新取一次。至于"上游这次收紧 schema 算不算缺陷"，那是报告内容，不是本技能要改的东西。
+
 ## 6. 冷启动验证（浏览器半边只在这一步被求值）
 
 前五步全部通过，**也只证明宿主半边**。原因很具体：
@@ -187,5 +222,7 @@ node $pnpm --dir $sc install --lockfile-only
 - [ ] `/dsh-market/api/v1/updates/summary`（缓存失效后）：该包不在 `updatable` 里
 - [ ] 离线 `install --lockfile-only` 通过（后续 GUI/市场操作不被拦）
 - [ ] 其它插件仍 live、入口文件仍在
+- [ ] 若是**更新**：已取过一条插件自己的可观测面（宿主路由 / 工具表），确认宿主半边真的挂上，而不是只看市场那条 `state`
+- [ ] 若是**更新**、且该插件导出 `Config`：已用插件包自己导出的 `Config` 校验 profile 里存的值（旧值可能与新版本 schema 冲突，冲突会让条目在激活期直接 failed）
 - [ ] 带 `dsh.client` 的插件：已说明"浏览器半边需冷启动验证"，或已完成冷启动并读过错日志
 - [ ] 已告知用户"是否需要重启"、备份与回滚方式
