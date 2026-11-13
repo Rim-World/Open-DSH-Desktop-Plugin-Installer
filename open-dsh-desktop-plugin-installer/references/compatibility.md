@@ -31,7 +31,7 @@ node scripts/plugin-compat.mjs --dir <本地目录|checkout>        # 本地源�
 | `engines.dsh` | 作者声明的宿主版本范围。**加载器不强制它**（有插件作者在 README 明写"加载器不强制 `engines.dsh`"），所以不满足范围也可能装得上——这正是要先核对的原因 | "插件没声明支持范围，**未知**" |
 | `engines.node` | 对 Node 的要求；和运行时 node（本机 24.21.0）比 | 同上 |
 | `peerDependencies` 的 `@deepseek-ai/*` | 宿主包。`autoInstallPeers: false`，由共享 fallback 提供；**只有在插件真的 `import` 它时才要紧**（只通过 `ctx.<service>` 用的，解析不到也没关系） | 逐条列出范围，别下结论 |
-| `dsh.bundle.patch` | **loader 契约**：有这个才是"bundle 插件" | 没有 → 见下"普通依赖" |
+| `dsh.bundle.patch` | **loader 契约**：有这个才是"bundle 插件"。值可以是字符串或**字符串数组**（多份补丁），两种都算有 | 没有 → 见下"普通依赖" |
 
 本机实测：desktop profile 的 10 个第三方插件里**只有 2 个**声明了 `engines.dsh`。所以"未声明"是常态——不要拿它当拒绝安装的理由，但也不能反过来拍胸脯保证。
 

@@ -74,6 +74,17 @@ const readJson = (path) => {
   }
 };
 
+/**
+ * dsh.bundle.patch 规范化。loader 认的可以是一个字符串，也可以是一个字符串数组——
+ * 一个包带多份补丁时作者会写成数组（宿主装配补丁 + 预设层补丁，比如 dsh-intelligent-ui）。
+ * 只按字符串处理会让 join() 收到数组并抛 ERR_INVALID_ARG_TYPE，核对直接崩在类型判定之前。
+ */
+const patchList = (value) => {
+  if (typeof value === 'string') return value ? [value] : [];
+  if (Array.isArray(value)) return value.filter((v) => typeof v === 'string' && v);
+  return [];
+};
+
 /** Read one file out of an Electron asar archive (header parse, no extraction). */
 function readFromAsar(asarPath, wanted) {
   let fd;
@@ -353,17 +364,19 @@ for (const target of targets) {
   const manifest = target.manifest;
   const enginesDsh = manifest.engines?.dsh ?? null;
   const enginesNode = manifest.engines?.node ?? null;
-  const patch = manifest.dsh?.bundle?.patch ?? null;
+  const patches = patchList(manifest.dsh?.bundle?.patch);
   const client = manifest.dsh?.client ?? null;
   const clientExport = manifest.exports?.['./client'] ?? null;
   const peers = Object.entries(manifest.peerDependencies ?? {});
 
   field('  engines.dsh', enginesDsh ?? '(未声明 → 支持范围未知，不等于不兼容)');
   field('  engines.node', enginesNode ?? '(未声明)');
-  field('  宿主半边', patch ? `dsh.bundle.patch = ${patch}` : '(无 → 装了也不会激活任何层，只是普通依赖)');
-  if (patch && target.local) {
-    const patchPath = join(target.dir, patch);
-    field('  宿主半边文件', existsSync(patchPath) ? `存在：${patch}` : `缺失：${patchPath}`);
+  field('  宿主半边', patches.length
+    ? `dsh.bundle.patch = ${patches.join(', ')}${patches.length > 1 ? `（${patches.length} 份，数组写法）` : ''}`
+    : '(无 → 装了也不会激活任何层，只是普通依赖)');
+  if (patches.length && target.local) {
+    const missing = patches.filter((p) => !existsSync(join(target.dir, p)));
+    field('  宿主半边文件', missing.length ? `缺失：${missing.join(', ')}` : `存在：${patches.join(', ')}`);
   }
   field('  浏览器半边', client
     ? `dsh.client platform=${client.platform ?? '(未写)'}${client.immediately ? ' immediately' : ''}${client.inject ? ` inject=[${client.inject.length}]` : ''}`
@@ -379,9 +392,9 @@ for (const target of targets) {
   // 所以 'web' 说明"两端都在加载路径上"，而别的取值需要作者确认。
   const oddPlatform = client?.platform && client.platform !== 'web' ? client.platform : null;
   let typeVerdict;
-  if (patch && client && oddPlatform) typeVerdict = `宿主 + 浏览器半边（但 platform="${oddPlatform}" 不是文档化的 "web"——浏览器半边支持哪个客户端需要确认）`;
-  else if (patch && client) typeVerdict = '宿主 + 浏览器半边（两端都在加载路径上；装后要实测 live）';
-  else if (patch) typeVerdict = '只有宿主半边（没有界面部分）';
+  if (patches.length && client && oddPlatform) typeVerdict = `宿主 + 浏览器半边（但 platform="${oddPlatform}" 不是文档化的 "web"——浏览器半边支持哪个客户端需要确认）`;
+  else if (patches.length && client) typeVerdict = '宿主 + 浏览器半边（两端都在加载路径上；装后要实测 live）';
+  else if (patches.length) typeVerdict = '只有宿主半边（没有界面部分）';
   else if (client) typeVerdict = '只有浏览器半边（需要 patch 行把它挂成 Loader row，否则不生效）';
   else typeVerdict = '普通依赖（无 dsh.bundle.patch → 官方文档：可安装但不激活任何层）';
 

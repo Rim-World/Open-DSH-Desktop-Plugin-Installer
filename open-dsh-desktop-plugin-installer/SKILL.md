@@ -3,9 +3,9 @@ name: open-dsh-desktop-plugin-installer
 description: "在 DSH Desktop（Electron 客户端）的 profile 上安装、升级、启用、停用、卸载插件，装坏时按备份回滚。动手前先做三项只读核对——插件声明的支持范围与类型、来源产物到底是哪个包、哪些包按各自的分发通道有更新——结论交用户决定；再处置 pnpm 供应链策略、镜像滞后、git 构建白名单挡路的问题。只适用于桌面端 profile；`state: live` 只覆盖宿主半边，带浏览器半边的插件要冷启动客户端才算验证过。触发场景：用户说「装/更新/停用/卸载 DSH 插件」「这个插件能不能装」「它支持我这个版本吗」「有几个插件能更新」「帮我更新一下」「插件装不上」「更新失败」「插件市场目录加载失败」「装完一重启客户端就起不来/白屏」，或要装指定版本、要给 GitHub 源的插件更新，或 pnpm 报 ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION / NO_MATCHING_VERSION / ERR_PNPM_IGNORED_BUILDS / Lockfile failed supply-chain policy / EPERM rename，或要求别重复安装。"
 whenToUse: 目标是 DSH Desktop 的插件生命周期操作（含「这个插件能不能装到我这台机器上」「有哪些能更新」这类先验问题），而官方 GUI / 市场 / CLI 走不通、需要版本级控制、或市场的更新表对某个包根本没有版本信息时。
 metadata:
-  version: "0.6.0"
+  version: "0.6.1"
   upstream: https://github.com/Rim-World/Open-DSH-Desktop-Plugin-Installer
-  updated: "2026-10-11"
+  updated: "2026-11-13"
   scope: "DSH Desktop (Electron) profile, Windows; 停用/卸载/回滚只在本地临时 bundle 上演练过——见「覆盖范围」"
 ---
 
@@ -35,7 +35,7 @@ DSH Desktop 的插件不是"复制一个目录"就完事的：一个插件要同
 
 这条规则比任何步骤都重要：**不要在没做过的路径上给用户保证**。
 
-已实测（Windows + DSH Desktop，运行时 `0.1.7-rc.2` 与 `0.2.0-rc.2` 两代都做过，自带 pnpm `11.7.0`）：
+已实测（Windows + DSH Desktop，运行时 `0.1.7-rc.2`、`0.2.0-rc.2`、`0.2.2-rc.3` 三代都做过；pnpm 前两代是 `11.7.0`，`0.2.2-rc.3` 换成 `11.28.5`，pnpm 与 node 的位置也一起挪到了 `<resources>\runtime\primary-runtime\dependencies\` 下）：
 
 | 路径 | 实测内容 |
 |---|---|
@@ -49,6 +49,7 @@ DSH Desktop 的插件不是"复制一个目录"就完事的：一个插件要同
 | **卸载** | 按官方顺序（先停用 → 再 `pnpm remove`）：依赖、`installed`、`activation`、`node_modules`、`unbundled` 全部回到基线，其余插件仍 `live` |
 | **从备份回滚** | 在一次真实损坏（manifest 写坏、宿主丢失整个插件列表）后恢复三个文件，宿主自动回到"全 live、无诊断、与基线逐字节一致" |
 | 策略与镜像 | 修复失效的 `minimumReleaseAgeExclude`、scope 级 `.npmrc`、`allowBuilds` 键 |
+| **`dsh.bundle.patch` 写成数组** | 两个脚本先把该字段归一化，再逐个查补丁文件；在一份带两份补丁的真实插件上验证过类型判定与文件存在性，单字符串写法回归通过 |
 | 验证 | 用宿主接口与日志判定结果，而不是看文件在不在 |
 
 **停用 / 卸载 / 回滚**的演练对象是一份**本地临时 bundle**（自己的空实现，`file:` 源）；安装、升级、换本地产物、启用则在真实第三方插件上做过。**未验证**：停用/卸载**第三方**（npm / git 源）插件时插件自身的副作用、**顺序颠倒**（仍启用着就 `pnpm remove`）、纯客户端插件（只有 `dsh.client`、无宿主半边）的完整生命周期、Creator 模式的 `plugin_manager` 工具路径、macOS/Linux 上的行为，以及类型结论之后的**功能冒烟**——"两端都在加载路径上"不等于"功能一定正常"。碰到这些场景，先把不确定性说清楚，再考虑走 GUI。
@@ -74,7 +75,7 @@ node scripts/profile-report.mjs            # 自动定位 DSH_HOME / profile / �
 - **profile 目录**：`$env:DSH_PROFILE_DIR`（会话已给）；否则 `$env:DSH_HOME\profiles\<profile>`。桌面端固定叫 `desktop`。
 - **确认桌面客户端正在运行**：后面的全部验证判据（`/dsh-market/*` 接口、热挂载、`boot` 时间戳）都依赖它。`profile-report.mjs` 的市场探测连不上或 `DSH_WEB_URL` 缺失时，先请用户启动客户端再进入写盘阶段；客户端没开时仍可完成安装本身，但「启用后即 live」无从验证，要在报告里说明。
 - **宿主运行时版本**（决定兼容性，别拿 CLI 的版本当它）：`<安装目录>\resources\runtime\primary-runtime\runtime.json` 的 `desktopVersion`；asar 内 `dsh/package.json` 的 `version` 是同一件事。
-- **pnpm 用 profile 自带的那个**：`<安装目录>\resources\runtime\pnpm\bin\pnpm.mjs`，用 PATH 上的 `node` 跑（`node <pnpm.mjs> …`）。不要用系统 npm/pnpm 去装 profile 依赖，也不要在 profile 目录外跑。
+- **pnpm 用 profile 自带的那个**，用 PATH 上的 `node` 跑（`node <pnpm.mjs> …`）。不要用系统 npm/pnpm 去装 profile 依赖，也不要在 profile 目录外跑。它的位置随客户端版本变过：`0.2.2-rc.3` 起在 `<安装目录>\resources\runtime\primary-runtime\dependencies\pnpm\bin\pnpm.mjs`，`0.2.0-rc.2` 及更早在 `<安装目录>\resources\runtime\pnpm\bin\pnpm.mjs`。两处都没有时按文件名搜一次：`Get-ChildItem -Recurse -Filter pnpm.mjs "<安装目录>\resources\runtime"`（bash：`find "<安装目录>/resources/runtime" -name pnpm.mjs`）。**不要**因为老路径不存在就判定"这台机器没自带 pnpm"，也别退回去用系统 pnpm。
 - **`dsh plugin --profile desktop` 是被拒绝的**（启动器硬编码该 profile 归 Electron 客户端所有）。不要浪费时间去试它或用 `--dump-config`。
 - 看有没有别的插件操作正在跑：`<profile>\.plugin-manager\run.json` 存在就等它结束再动。
 - **先搜一遍这两个日志里有没有你这次要动的包**（`<profile>\.plugin-manager\logs\*\pnpm.log`、`<profile>\.dsh-market\log.ndjson`）——同一条命令之前失败过时，真正的报错文本就在那里，而用户转述的原因往往只是猜测。这一步很便宜，能省掉一次盲目重试。**不要只搜包名**：仓库名 / 附件文件名 / 提交 sha 都可能出现，而它们常与包名不同；包名 0 命中不等于没有记录，换关键词再搜一次。

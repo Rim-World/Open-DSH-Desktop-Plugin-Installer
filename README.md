@@ -139,7 +139,7 @@ node open-dsh-desktop-plugin-installer/scripts/plugin-compat.mjs --dir ./some-pl
 
 ## 前置条件
 
-- 一台装了 DSH Desktop 的机器。技能用客户端自带的 pnpm：`<安装目录>/resources/runtime/pnpm/bin/pnpm.mjs`。
+- 一台装了 DSH Desktop 的机器。技能用客户端自带的 pnpm：`<安装目录>/resources/runtime/primary-runtime/dependencies/pnpm/bin/pnpm.mjs`（`0.2.0-rc.2` 及更早在 `<安装目录>/resources/runtime/pnpm/bin/pnpm.mjs`，两处都没有就按文件名搜 `<安装目录>/resources/runtime` 下）。
 - 桌面客户端正在运行。`/dsh-market/*` 接口、热挂载、`boot` 时间戳都以它为前提；客户端没开时安装本身能做，但验证做不了，报告里要说明。
 - 会话有完整文件权限。profile 在 `~/.dsh` 下，在会话工作区之外，`workspace-write` 会被文件沙箱拒绝。技能第一步就是申请这个权限并说明原因。
 - 可选：`gh` CLI 或 `git`，只在拉 git 源插件时需要。
@@ -178,6 +178,14 @@ node open-dsh-desktop-plugin-installer/scripts/plugin-compat.mjs --dir ./some-pl
 ## 版本与生成说明
 
 版本号见 `SKILL.md` frontmatter 的 `metadata.version`，`metadata.updated` 随每次改动更新。本机 DSH 安装的那份与仓库 `main` 保持同步。技能正文和参考文档不写具体排查日期，只保留可复用的判据。
+
+### 0.6.1（数组写法的 `dsh.bundle.patch`、pnpm 新路径）
+
+- `scripts/profile-report.mjs` 与 `scripts/plugin-compat.mjs` 不再假定 `dsh.bundle.patch` 是字符串：新增归一化后逐个校验补丁文件。此前遇到数组写法会抛 `ERR_INVALID_ARG_TYPE`，整个快照或核对在类型判定之前就崩掉。
+- `references/verification.md` 的入口产物检查改成同时支持字符串与数组的写法。
+- `references/artifact-identity.md` 与 `references/compatibility.md` 补上该字段可为数组的判据；五处名字自洽的第 2 处改为逐份补丁检查。
+- 客户端自带 pnpm 的位置随 `0.2.2-rc.3` 变到 `<安装目录>\resources\runtime\primary-runtime\dependencies\pnpm\bin\pnpm.mjs`。`SKILL.md`、`references/profile-layout.md` 与本 README 给出两代路径和按文件名搜索的兜底，避免把「老路径不在」误判成「没自带 pnpm」。
+- 覆盖范围补记 `0.2.2-rc.3`（pnpm `11.28.5`）上的实测。
 
 ### 0.6.0（四个落账点）
 

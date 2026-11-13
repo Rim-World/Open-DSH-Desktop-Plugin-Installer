@@ -58,6 +58,18 @@ const listDirs = (dir) => {
   }
 };
 
+/**
+ * dsh.bundle.patch 规范化。loader 认的可以是一个字符串，也可以是一个字符串数组——
+ * 一个包带多份补丁时作者会写成数组（例如宿主装配补丁 + 预设层补丁）。
+ * 只处理字符串那种写法会让后面的 join() 收到数组并抛 ERR_INVALID_ARG_TYPE，
+ * 整个快照直接崩在第一个数组写法的包上。
+ */
+const patchList = (value) => {
+  if (typeof value === 'string') return value ? [value] : [];
+  if (Array.isArray(value)) return value.filter((v) => typeof v === 'string' && v);
+  return [];
+};
+
 /** Read one file out of an Electron asar archive (header parse, no extraction). */
 function readFromAsar(asarPath, wanted) {
   let fd;
@@ -241,10 +253,11 @@ for (const [name, spec] of deps) {
     attention.push(`${name} is declared but missing from node_modules`);
     continue;
   }
-  const entry = pkg.dsh?.bundle?.patch ? 'bundle' : (pkg.main ?? '(no main)');
-  const patchOk = pkg.dsh?.bundle?.patch ? existsSync(join(dir, pkg.dsh.bundle.patch)) : true;
-  line(`  ${name.padEnd(34)} ${String(pkg.version).padEnd(12)} entry=${entry}${patchOk ? '' : '  [patch file MISSING]'}`);
-  if (!patchOk) attention.push(`${name}: dsh.bundle.patch points at a file that does not exist`);
+  const patches = patchList(pkg.dsh?.bundle?.patch);
+  const entry = patches.length ? (patches.length > 1 ? `bundle(${patches.length})` : 'bundle') : (pkg.main ?? '(no main)');
+  const missing = patches.filter((p) => !existsSync(join(dir, p)));
+  line(`  ${name.padEnd(34)} ${String(pkg.version).padEnd(12)} entry=${entry}${missing.length ? `  [patch file MISSING: ${missing.join(', ')}]` : ''}`);
+  if (missing.length) attention.push(`${name}: dsh.bundle.patch points at missing file(s): ${missing.join(', ')}`);
 }
 
 // ---------------------------------------------------------------- 5. operations in flight

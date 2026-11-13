@@ -98,7 +98,8 @@ Get-ChildItem <profile> -Recurse -File -Force | Where-Object { $_.LastWriteTime 
 (Get-Content <profile>\node_modules\<pkg>\package.json -Raw | ConvertFrom-Json).version
 # 入口产物：路径以清单为准（dsh.bundle.patch 与 main/exports 指向的文件都要在，不要猜文件名）
 $m = Get-Content <profile>\node_modules\<pkg>\package.json -Raw | ConvertFrom-Json
-if ($m.dsh.bundle.patch) { Test-Path ("<profile>\node_modules\<pkg>\" + $m.dsh.bundle.patch) }
+# dsh.bundle.patch 可能是字符串，也可能是字符串数组（一个包带多份补丁）；用 @() 包一层两种写法都能遍历
+foreach ($p in @($m.dsh.bundle.patch)) { if ($p) { "{0}: {1}" -f $p, (Test-Path ("<profile>\node_modules\<pkg>\" + $p)) } }
 # 其它插件是否被依赖树重解包搞坏（<pkg-n> 换成两个真实存在的其它插件名）
 foreach ($p in @('<pkg-n1>','<pkg-n2>')) { "{0} files={1}" -f $p, (Get-ChildItem "<profile>\node_modules\$p" -Recurse -File | Measure-Object).Count }
 ```

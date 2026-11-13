@@ -11,7 +11,7 @@
 | `$env:DSH_HOME\profiles\node_modules` | **共享模块 fallback**：宿主包的软链/联结，profile 内插件靠它解析 `@deepseek-ai/*` |
 | `<安装目录>\resources\app.asar` | 客户端打包的 DSH 运行时（`dsh/node_modules/**` 里有宿主自己的包） |
 | `<安装目录>\resources\runtime\primary-runtime\runtime.json` | `desktopVersion` = 宿主运行时版本（**兼容性判定的依据**） |
-| `<安装目录>\resources\runtime\pnpm\bin\pnpm.mjs` | 客户端自带的 pnpm（profile 操作要用它） |
+| `<安装目录>\resources\runtime\primary-runtime\dependencies\pnpm\bin\pnpm.mjs` | 客户端自带的 pnpm（profile 操作要用它）。`0.2.0-rc.2` 及更早在 `<resources>\runtime\pnpm\bin\pnpm.mjs`——路径随版本挪过，两处都没有就按文件名搜 `<resources>\runtime` 下 |
 | `<安装目录>\resources\runtime\bin\node.cmd` | 客户端自带的 node 启动壳（依赖 `DSH_DESKTOP_NODE_EXECUTABLE`）；用 PATH 上的 `node` 跑 `pnpm.mjs` 即可 |
 
 Windows 安装目录通常在 `%LOCALAPPDATA%\Programs\DeepSeek Harness`；macOS 是 `/Applications/DeepSeek Harness.app/Contents/Resources`；Linux 随发行包而变。`scripts/profile-report.mjs` 会挨个探测。
