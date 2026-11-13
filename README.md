@@ -115,6 +115,19 @@ Copy-Item -Recurse .\Open-DSH-Desktop-Plugin-Installer\open-dsh-desktop-plugin-i
 
 装一份就够：`~/.dsh/skills/`（DSH 技能中枢可管理）或 `~/.agents/skills/`（跨工具通用），二选一。两个根都放会出现同名冲突。安装后不用重启：DSH 会监听技能根目录，新技能在下一个模型步骤就能看到。
 
+### 调用方式（可选：只由用户主动调用）
+
+默认安装后本技能会进入模型的技能目录，模型可以在它认为匹配的任务里自行加载。若希望只有用户主动调用时才加载，在 `SKILL.md` 的 frontmatter 加一行：
+
+```yaml
+name: open-dsh-desktop-plugin-installer
+disable-model-invocation: true
+```
+
+放在 `name` 下面，顺序不影响解析，挨着放不容易漏。效果：本技能从模型的技能目录里消失，用户仍可直接调用（本机实测到「从目录消失」这一半）。本机 `open-dsh-skill-creator`、`teach-me` 用的是同一写法。
+
+这一行属于**本机部署选择**，不是技能内容：仓库里不带它，安装后从仓库覆盖同步时也会丢，需要补回。本仓库作者的机器即采用这一模式。
+
 ## 快速开始
 
 技能被触发后，第一件事是跑只读快照，不需要任何依赖：
@@ -186,6 +199,7 @@ node open-dsh-desktop-plugin-installer/scripts/plugin-compat.mjs --dir ./some-pl
 - `references/artifact-identity.md` 与 `references/compatibility.md` 补上该字段可为数组的判据；五处名字自洽的第 2 处改为逐份补丁检查。
 - 客户端自带 pnpm 的位置随 `0.2.2-rc.3` 变到 `<安装目录>\resources\runtime\primary-runtime\dependencies\pnpm\bin\pnpm.mjs`。`SKILL.md`、`references/profile-layout.md` 与本 README 给出两代路径和按文件名搜索的兜底，避免把「老路径不在」误判成「没自带 pnpm」。
 - 覆盖范围补记 `0.2.2-rc.3`（pnpm `11.28.5`）上的实测。
+- 安装一节补上「只由用户主动调用」的可选部署方式：frontmatter 加 `disable-model-invocation: true`，并写明这是本机部署选择、从仓库同步时会丢。
 
 ### 0.6.0（四个落账点）
 
